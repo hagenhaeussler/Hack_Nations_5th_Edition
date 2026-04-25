@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="LabPilot — plan biology experiments end-to-end: references, timelines, budgets."
+    />
+    <title>LabPilot</title>
+    <script>
+      // Apply saved theme synchronously before React paints — avoids the
+      // light-mode flash for users who chose dark or are on a dark OS.
+      // Mirrors `usePersonalSettings.ts` storage key + `[data-theme="dark"]`.
+      (function () {
+        try {
+          var raw = localStorage.getItem("labpilot.personalSettings.v1");
+          var pref = raw ? (JSON.parse(raw) || {}).theme : "system";
+          if (pref !== "light" && pref !== "dark") pref = "system";
+          var resolved =
+            pref === "system"
+              ? window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light"
+              : pref;
+          if (resolved === "dark") {
+            document.documentElement.setAttribute("data-theme", "dark");
+          }
+          var rmRaw = raw ? (JSON.parse(raw) || {}).reducedMotion : false;
+          if (rmRaw === true) {
+            document.documentElement.setAttribute(
+              "data-reduced-motion",
+              "true"
+            );
+          }
+        } catch (e) {
+          // Fail silently — defaults render fine without the bootstrap.
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

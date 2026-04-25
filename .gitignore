@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# vite
+.vite/
+
+# logs
+*.log
+npm-debug.log*
+
+# env
+.env
+.env.local
+.env.*.local
+
+# editor
+.vscode/
+.idea/
+.DS_Store
+
+# uploads (backend)
+backend/uploads/
