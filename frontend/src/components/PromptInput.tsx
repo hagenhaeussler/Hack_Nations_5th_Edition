@@ -230,9 +230,6 @@ export function PromptInput({
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="hidden text-[11px] uppercase tracking-[0.06em] text-text-tertiary sm:inline">
-              {value.length > 0 ? "Enter to send · Shift + Enter for newline" : ""}
-            </span>
             <button
               type="button"
               onClick={() => void handleSubmit()}

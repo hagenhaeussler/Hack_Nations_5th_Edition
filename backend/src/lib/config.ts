@@ -9,7 +9,8 @@ export type ServiceName =
   | "database"
   | "storage"
   | "researchApi"
-  | "embeddings";
+  | "embeddings"
+  | "tavily";
 
 const hasValue = (value: string | undefined): boolean =>
   typeof value === "string" && value.trim().length > 0;
@@ -26,12 +27,17 @@ const openaiResearchStepTimeoutMs = Number.parseInt(
 const openAlexEnabled = process.env.OPENALEX_ENABLED !== "false";
 const openAlexMaxResults = Number.parseInt(process.env.OPENALEX_MAX_RESULTS ?? "24", 10);
 const openAlexMaxQueries = Number.parseInt(process.env.OPENALEX_MAX_QUERIES ?? "3", 10);
-const openAlexTimeoutMs = Number.parseInt(process.env.OPENALEX_TIMEOUT_MS ?? "8000", 10);
+const openAlexTimeoutMs = Number.parseInt(process.env.OPENALEX_TIMEOUT_MS ?? "30000", 10);
+const tavilyApiKey = process.env.TAVILY_API_KEY;
+const tavilyMaxResults = Number.parseInt(process.env.TAVILY_MAX_RESULTS ?? "5", 10);
+const tavilyTimeoutMs = Number.parseInt(process.env.TAVILY_TIMEOUT_MS ?? "12000", 10);
+const tavilyMaxResources = Number.parseInt(process.env.TAVILY_MAX_RESOURCES ?? "20", 10);
 
 const supabaseConfigured =
   hasValue(supabaseUrl) && (hasValue(supabaseServiceRoleKey) || hasValue(supabaseAnonKey));
 const databaseConfigured = hasValue(databaseUrl);
 const openaiConfigured = hasValue(openaiApiKey);
+const tavilyConfigured = hasValue(tavilyApiKey);
 const genericResearchConfigured =
   hasValue(process.env.GENERIC_RESEARCH_API_URL) &&
   hasValue(process.env.GENERIC_RESEARCH_API_KEY);
@@ -79,6 +85,19 @@ export const config = {
       ? Math.max(1000, Math.min(30_000, openAlexTimeoutMs))
       : 8000,
   },
+  tavily: {
+    enabled: tavilyConfigured,
+    apiKey: tavilyApiKey ?? null,
+    maxResults: Number.isFinite(tavilyMaxResults)
+      ? Math.max(1, Math.min(10, tavilyMaxResults))
+      : 5,
+    timeoutMs: Number.isFinite(tavilyTimeoutMs)
+      ? Math.max(1000, Math.min(30_000, tavilyTimeoutMs))
+      : 12_000,
+    maxResources: Number.isFinite(tavilyMaxResources)
+      ? Math.max(1, Math.min(50, tavilyMaxResources))
+      : 20,
+  },
   models: {
     high: process.env.OPENAI_HIGH_MODEL ?? "gpt-5.5",
     medium: process.env.OPENAI_MEDIUM_MODEL ?? "gpt-5.4-mini",
@@ -101,6 +120,8 @@ export function getMissingServiceMessage(serviceName: ServiceName): string {
       return "OpenAlex or an external research API is not configured. Using demo research sources.";
     case "embeddings":
       return "Embeddings not configured. Using keyword search fallback.";
+    case "tavily":
+      return "Tavily API key not configured. Showing supplier search links instead of live supplier matches.";
   }
 }
 

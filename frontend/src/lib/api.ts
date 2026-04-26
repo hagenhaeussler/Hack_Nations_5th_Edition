@@ -13,6 +13,7 @@ import type {
   FinalExperimentPlan,
   LessonCard,
   PlanEditRequest,
+  ProcurementReport,
   Project,
   ProjectStatsReport,
   RiskAnalysisResult,
@@ -235,6 +236,13 @@ export async function getProject(id: string): Promise<Project> {
     `/api/projects/${encodeURIComponent(id)}`,
   );
   return res.project;
+}
+
+export async function getProjectResources(id: string): Promise<ProcurementReport> {
+  const res = await jsonRequest<{ procurement: ProcurementReport }>(
+    `/api/projects/${encodeURIComponent(id)}/resources`,
+  );
+  return res.procurement;
 }
 
 export async function updateWorkflowNode(

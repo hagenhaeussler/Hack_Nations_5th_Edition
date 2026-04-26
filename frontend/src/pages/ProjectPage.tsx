@@ -1,5 +1,5 @@
 import { CalendarRange, ExternalLink, MessageCircle, ShieldAlert, Star, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { LoadingScreen } from "@/components/LoadingScreen";
@@ -7,6 +7,7 @@ import { BenchmarkEvaluationModal } from "@/components/benchmark/BenchmarkEvalua
 import { CalendarView } from "@/components/calendar/CalendarView";
 import { PaperGraph } from "@/components/PaperGraph";
 import { PaperList } from "@/components/PaperList";
+import { ResourcesView } from "@/components/resources/ResourcesView";
 import { RiskAnalyzerModal } from "@/components/risk/RiskAnalyzerModal";
 import { StatisticsView } from "@/components/statistics/StatisticsView";
 import {
@@ -25,19 +26,23 @@ import {
 } from "@/lib/api";
 import { buildPaperRelevanceExplanation, similarityLabel, type Paper } from "@/lib/papers";
 import {
-  STATUS_LABEL,
   type PlanEditRequest,
   type Project,
   type Workflow,
-  formatRelativeTime,
 } from "@/lib/projects";
+import { renderPaperText, stripPaperMarkup } from "@/lib/paperText";
 import { cn } from "@/lib/utils";
 
-type ProjectPageSlug = "calendar" | "statistics" | "literature";
+type ProjectPageSlug = "calendar" | "statistics" | "literature" | "resources";
 type LiteratureViewMode = "graph" | "papers";
 
 function isProjectPageSlug(value: string | undefined): value is ProjectPageSlug {
-  return value === "calendar" || value === "statistics" || value === "literature";
+  return (
+    value === "calendar" ||
+    value === "statistics" ||
+    value === "literature" ||
+    value === "resources"
+  );
 }
 
 function sameJsonValue(left: unknown, right: unknown): boolean {
@@ -49,7 +54,7 @@ function sameJsonValue(left: unknown, right: unknown): boolean {
  *
  * The view is driven by `project.status`:
  *   - `research-ready`: literature panel with a CTA to generate the calendar.
- *   - `ready`: tabbed calendar / statistics / literature view.
+ *   - `ready`: tabbed calendar / statistics / literature / resources view.
  *   - `researching` / `generating`: loading screen (rare — only when a stale
  *     status is fetched mid-flight; the normal loading lives at the call
  *     site).
@@ -110,7 +115,14 @@ export function ProjectPage() {
       <LoadingScreen
         eyebrow="Loading"
         title="Opening project"
-        detail="Fetching the latest snapshot of this project."
+        detail="Getting the latest version ready."
+        estimatedDurationMs={2800}
+        progressLabel="Loading progress"
+        steps={[
+          { label: "Fetching", progress: 20 },
+          { label: "Preparing", progress: 58 },
+          { label: "Opening", progress: 84 },
+        ]}
       />
     );
   }
@@ -130,14 +142,18 @@ export function ProjectPage() {
   if (generating || project.status === "generating") {
     return (
       <LoadingScreen
-        eyebrow="Designing the experiment"
-        title="Drafting your calendar"
-        detail="Placing scheduled tasks into day buckets for the experiment calendar."
+        eyebrow="Planning"
+        title="Building your Workflow"
+        detail="Turning the research into a simple experiment timeline."
         prompt={project.hypothesis}
+        estimatedDurationMs={14000}
+        progressLabel="Calendar progress"
+        visual="timeline"
         steps={[
-          "Drafting scheduled task cards",
-          "Grouping work into week and day buckets",
-          "Estimating effort, resources, and budget",
+          { label: "Collecting tasks", progress: 14 },
+          { label: "Scheduling the timeline", progress: 42 },
+          { label: "Processing dependencies", progress: 68 },
+          { label: "Personalising process", progress: 86 },
         ]}
       />
     );
@@ -146,10 +162,17 @@ export function ProjectPage() {
   if (project.status === "researching") {
     return (
       <LoadingScreen
-        eyebrow="Reviewing the literature"
-        title="Reading the field"
-        detail="Surfacing related work for your hypothesis."
+        eyebrow="Researching"
+        title="Finishing the literature pass"
+        detail="A few results are still coming together."
         prompt={project.hypothesis}
+        estimatedDurationMs={12000}
+        progressLabel="Research progress"
+        steps={[
+          { label: "Reading", progress: 28 },
+          { label: "Scoring", progress: 58 },
+          { label: "Saving", progress: 84 },
+        ]}
       />
     );
   }
@@ -247,6 +270,17 @@ function ProjectWorkspaceView({
     return () => window.clearTimeout(timeout);
   }, [learningNotice]);
 
+  // Surface backend setup warnings (e.g. "Supabase is not configured…") to the
+  // browser console instead of taking up vertical space in the UI. We dedupe so
+  // navigating between calendar / statistics / literature does not spam logs.
+  useEffect(() => {
+    const warnings = (project.setup_warnings ?? []).filter(Boolean);
+    if (warnings.length === 0) return;
+    for (const message of warnings) {
+      console.warn(`[labpilot] ${message}`);
+    }
+  }, [project.setup_warnings]);
+
   const handleNodeDataChange = useCallback(
     async (nodeId: string, data: WorkflowNodeData) => {
       const current = workflow?.nodes.find((node) => node.id === nodeId);
@@ -300,6 +334,62 @@ function ProjectWorkspaceView({
     [onProjectChange, project.id, workflow],
   );
 
+  const handleTaskDurationChange = useCallback(
+    (taskId: string, timeEstimate: string) => {
+      if (!workflow) return;
+      const current = workflow.nodes.find((node) => node.id === taskId);
+      if (!current || current.data.timeEstimate === timeEstimate) return;
+
+      void applyPlanEdit(project.id, {
+        change_source: "frontend_calendar_edit",
+        target_type: "task",
+        target_id: taskId,
+        field_changed: "timeEstimate",
+        old_value: current.data.timeEstimate,
+        new_value: timeEstimate,
+        change_type: "task_resized",
+        metadata: {
+          ui_context: "week_calendar_resize",
+        },
+      }).then((result) => {
+        onProjectChange(result.project);
+        if (result.generated_lesson_cards.length > 0) {
+          setLearningNotice(
+            "Learning saved: Future similar experiments will use this duration correction.",
+          );
+        }
+      });
+    },
+    [onProjectChange, project.id, workflow],
+  );
+
+  const handleTaskStatusChange = useCallback(
+    (taskId: string, status: NonNullable<Workflow["nodes"][number]["data"]["status"]>) => {
+      if (!workflow) return;
+      const current = workflow.nodes.find((node) => node.id === taskId);
+      if (!current || (current.data.status ?? "upcoming") === status) return;
+
+      void applyPlanEdit(project.id, {
+        change_source: "frontend_calendar_edit",
+        target_type: "task",
+        target_id: taskId,
+        field_changed: "status",
+        old_value: current.data.status ?? "upcoming",
+        new_value: status,
+        change_type: "task_completion_toggled",
+        metadata: {
+          ui_context: "week_calendar_completion_toggle",
+        },
+      }).then((result) => {
+        onProjectChange(result.project);
+        if (result.generated_lesson_cards.length > 0) {
+          setLearningNotice("Learning saved: Future similar experiments will use this status correction.");
+        }
+      });
+    },
+    [onProjectChange, project.id, workflow],
+  );
+
   const handleQAMessagesChange = useCallback(
     (messages: PlanQAMessage[]) => {
       if (!planId) return;
@@ -323,10 +413,13 @@ function ProjectWorkspaceView({
       }
       if (
         action.type === "open_report_section" ||
-        action.type === "open_purchase_list" ||
         action.type === "open_risk_summary"
       ) {
         navigate(`/projects/${project.id}/statistics`);
+        return;
+      }
+      if (action.type === "open_purchase_list") {
+        navigate(`/projects/${project.id}/resources`);
         return;
       }
       if (action.type === "open_citation") {
@@ -351,24 +444,19 @@ function ProjectWorkspaceView({
 
   return (
     <main className="relative flex h-screen min-h-0 flex-col overflow-hidden">
-      <ProjectHeader
-        project={project}
-        right={
-          showsLiteratureWorkspace ? (
-            <ViewModeToggle
-              viewMode={literatureViewMode}
-              onToggle={() =>
-                setLiteratureViewMode((mode) => (mode === "papers" ? "graph" : "papers"))
-              }
-            />
-          ) : undefined
-        }
-      />
-
-      <SetupWarningBanner warnings={project.setup_warnings} mode={project.generation_mode} />
+      {showsLiteratureWorkspace ? (
+        <div className="absolute right-6 top-6 z-20">
+          <ViewModeToggle
+            viewMode={literatureViewMode}
+            onToggle={() =>
+              setLiteratureViewMode((mode) => (mode === "papers" ? "graph" : "papers"))
+            }
+          />
+        </div>
+      ) : null}
 
       {learningNotice ? (
-        <div className="pointer-events-none absolute right-6 top-24 z-20 rounded-md border border-[color:var(--border-default)] bg-bg-surface px-3 py-2 text-[12px] font-medium text-text-primary shadow-md">
+        <div className="pointer-events-none fixed bottom-6 right-6 z-50 max-w-[320px] rounded-md border border-[color:var(--border-default)] bg-bg-surface px-3 py-2 text-[12px] font-medium text-text-primary shadow-md">
           {learningNotice}
         </div>
       ) : null}
@@ -380,9 +468,12 @@ function ProjectWorkspaceView({
               <div className="relative min-w-0 flex-1">
                 <CalendarView
                   workflow={workflow}
+                  planCreatedAt={project.finalPlan?.created_at ?? project.createdAt}
                   selectedTaskId={selectedNodeId}
                   onTaskSelect={setSelectedNodeId}
                   onTaskMove={handleTaskMove}
+                  onTaskDurationChange={handleTaskDurationChange}
+                  onTaskStatusChange={handleTaskStatusChange}
                   headerActions={
                     planId ? (
                       <>
@@ -468,6 +559,12 @@ function ProjectWorkspaceView({
         ) : (
           <GeneratePlaceholder onGenerate={onGenerate} />
         )
+      ) : page === "resources" ? (
+        workflow ? (
+          <ResourcesView project={project} />
+        ) : (
+          <GeneratePlaceholder onGenerate={onGenerate} />
+        )
       ) : (
         <LiteratureTab project={project} viewMode={literatureViewMode} />
       )}
@@ -513,7 +610,6 @@ function ResearchGraphPage({
     [project.papers],
   );
   const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
-  const topSimilarity = papers[0]?.similarity ?? 0;
 
   return (
     <ResearchLiteratureView
@@ -521,7 +617,6 @@ function ResearchGraphPage({
       papers={papers}
       viewMode={viewMode}
       selectedPaperId={selectedPaperId}
-      topSimilarity={topSimilarity}
       onSelectPaper={(paper) =>
         setSelectedPaperId((current) => (current === paper.id ? null : paper.id))
       }
@@ -535,7 +630,6 @@ function ResearchLiteratureView({
   papers,
   viewMode,
   selectedPaperId,
-  topSimilarity,
   onSelectPaper,
   action,
 }: {
@@ -543,16 +637,36 @@ function ResearchLiteratureView({
   papers: Paper[];
   viewMode: LiteratureViewMode;
   selectedPaperId: string | null;
-  topSimilarity: number;
   onSelectPaper: (paper: Paper) => void;
   action?: React.ReactNode;
 }) {
   const [detailPaper, setDetailPaper] = useState<Paper | null>(null);
+  const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
 
   const openPaperDetails = (paper: Paper) => {
+    if (detailPaper?.id === paper.id && detailDrawerOpen) {
+      onSelectPaper(paper);
+      setDetailDrawerOpen(false);
+      return;
+    }
+
     if (selectedPaperId !== paper.id) onSelectPaper(paper);
     setDetailPaper(paper);
+    window.requestAnimationFrame(() => setDetailDrawerOpen(true));
   };
+
+  const closePaperDetails = () => {
+    if (detailPaper && selectedPaperId === detailPaper.id) {
+      onSelectPaper(detailPaper);
+    }
+    setDetailDrawerOpen(false);
+  };
+
+  useEffect(() => {
+    if (detailDrawerOpen || !detailPaper) return;
+    const id = window.setTimeout(() => setDetailPaper(null), 220);
+    return () => window.clearTimeout(id);
+  }, [detailDrawerOpen, detailPaper]);
 
   if (papers.length === 0) {
     return (
@@ -575,6 +689,7 @@ function ResearchLiteratureView({
           <div className="h-full min-h-0 rounded-md border border-[color:var(--border-default)] bg-bg-surface p-4 shadow-sm">
             <PaperGraph
               papers={papers}
+              hypothesis={hypothesis}
               selectedPaperId={selectedPaperId}
               onSelect={openPaperDetails}
             />
@@ -585,22 +700,16 @@ function ResearchLiteratureView({
       {viewMode === "papers" ? (
       <aside className="flex min-h-0 flex-col overflow-hidden">
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
-          <header className="mb-3 flex items-end justify-between gap-3">
+          <header className="mb-4">
             <div>
               <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
-                Fetched papers
+                {papers.length} fetched paper{papers.length === 1 ? "" : "s"}
               </p>
               <h3 className="mt-1 font-sans text-[18px] font-medium text-text-primary">
                 Relevance ranked
               </h3>
             </div>
-            <span className="text-[12px] text-text-tertiary">
-              {papers.length} result{papers.length === 1 ? "" : "s"}
-            </span>
           </header>
-          <p className="mb-4 text-[12.5px] text-text-secondary">
-            Ordered by semantic relevance. Top match: {Math.round(topSimilarity * 100)}%.
-          </p>
           <PaperList
             hypothesis={hypothesis}
             papers={papers}
@@ -616,13 +725,14 @@ function ResearchLiteratureView({
         <PaperDetailDrawer
           paper={detailPaper}
           hypothesis={hypothesis}
-          onClose={() => setDetailPaper(null)}
+          isOpen={detailDrawerOpen}
+          onClose={closePaperDetails}
         />
       ) : null}
 
       {action ? (
         <div className="pointer-events-none absolute bottom-6 left-1/2 z-20 -translate-x-1/2">
-          <div className="pointer-events-auto rounded-full bg-bg-surface/95 p-2 shadow-lg ring-1 ring-[color:var(--border-default)] backdrop-blur">
+          <div className="pointer-events-auto rounded-md bg-bg-surface/95 p-2 shadow-lg ring-1 ring-[color:var(--border-default)] backdrop-blur">
             {action}
           </div>
         </div>
@@ -643,7 +753,7 @@ function ViewModeToggle({
     <button
       type="button"
       onClick={onToggle}
-      className="inline-flex items-center rounded-full border border-[color:var(--border-default)] bg-bg-surface px-4 py-2 text-[12px] font-medium text-text-primary shadow-sm hover:bg-bg-hover"
+      className="inline-flex items-center rounded-sm border border-[color:var(--border-default)] bg-bg-surface px-4 py-2 text-[12px] font-medium text-text-primary shadow-sm transition-colors duration-[var(--duration-fast)] hover:bg-bg-hover"
       aria-label={nextLabel}
     >
       {nextLabel}
@@ -654,32 +764,70 @@ function ViewModeToggle({
 function PaperDetailDrawer({
   paper,
   hypothesis,
+  isOpen,
   onClose,
 }: {
   paper: Paper;
   hypothesis: string;
+  isOpen: boolean;
   onClose: () => void;
 }) {
+  const drawerRef = useRef<HTMLElement | null>(null);
   const [showPdfPreview, setShowPdfPreview] = useState(false);
   const graphLinkCount =
     (paper.referencedPaperIds?.length ?? 0) + (paper.relatedPaperIds?.length ?? 0);
   const relevanceExplanation = buildPaperRelevanceExplanation(paper, hypothesis);
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const drawer = drawerRef.current;
+      if (!drawer || !(event.target instanceof Node)) return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-paper-card='true']")
+      ) {
+        return;
+      }
+      if (!drawer.contains(event.target)) onClose();
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [isOpen, onClose]);
+
   return (
-    <aside className="absolute inset-y-0 right-0 z-30 flex w-full max-w-[440px] flex-col border-l border-[color:var(--border-default)] bg-bg-primary shadow-2xl">
+    <aside
+      ref={drawerRef}
+      className={cn(
+        "absolute inset-y-0 right-0 z-30 flex w-full max-w-[440px] flex-col",
+        "border-l border-[color:var(--border-default)] bg-bg-primary shadow-2xl",
+        "transform-gpu transition-transform duration-200 ease-in-out will-change-transform",
+        isOpen ? "translate-x-0" : "translate-x-full",
+      )}
+    >
       <header className="flex items-start justify-between gap-4 border-b border-[color:var(--border-default)] px-5 py-4">
         <div className="min-w-0">
           <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
             Paper details
           </p>
           <h3 className="mt-1 line-clamp-3 font-sans text-[18px] font-medium leading-[1.25] text-text-primary">
-            {paper.title}
+            {renderPaperText(paper.title)}
           </h3>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="rounded-full p-1.5 text-text-tertiary hover:bg-bg-hover hover:text-text-primary"
+          className="rounded-sm p-1.5 text-text-tertiary transition-colors duration-[var(--duration-fast)] hover:bg-bg-hover hover:text-text-primary"
           aria-label="Close paper details"
         >
           <X size={17} strokeWidth={1.75} />
@@ -710,7 +858,7 @@ function PaperDetailDrawer({
           </p>
           {paper.novelty_relation ? (
             <p className="mt-2 text-[13px] leading-[1.6] text-text-secondary">
-              {paper.novelty_relation}
+              {renderPaperText(paper.novelty_relation)}
             </p>
           ) : null}
         </section>
@@ -751,14 +899,14 @@ function PaperDetailDrawer({
             Abstract
           </p>
           <p className="mt-1 text-[13px] leading-[1.65] text-text-secondary">
-            {paper.abstract}
+            {renderPaperText(paper.abstract)}
           </p>
         </section>
 
         {paper.pdfUrl && showPdfPreview ? (
           <section className="mt-4 overflow-hidden rounded-md border border-[color:var(--border-default)] bg-bg-surface">
             <iframe
-              title={`PDF preview for ${paper.title}`}
+              title={`PDF preview for ${stripPaperMarkup(paper.title)}`}
               src={paper.pdfUrl}
               className="h-[420px] w-full"
             />
@@ -813,93 +961,10 @@ function LiteratureTab({
       papers={papers}
       viewMode={viewMode}
       selectedPaperId={selectedPaperId}
-      topSimilarity={papers[0]?.similarity ?? 0}
       onSelectPaper={(paper) =>
         setSelectedPaperId((current) => (current === paper.id ? null : paper.id))
       }
     />
-  );
-}
-
-function SetupWarningBanner({
-  warnings,
-  mode,
-}: {
-  warnings?: string[];
-  mode?: Project["generation_mode"];
-}) {
-  const [dismissed, setDismissed] = useState(false);
-  const visibleWarnings = (warnings ?? []).filter(Boolean).slice(0, 2);
-  if (dismissed || visibleWarnings.length === 0) return null;
-  const label =
-    mode === "openai"
-      ? "Connected mode"
-      : mode === "partial"
-        ? "Partial mode"
-        : "Demo mode";
-  return (
-    <div className="flex items-start justify-between gap-4 border-b border-[color:var(--border-default)] bg-accent-subtle px-8 py-2 text-[12px] leading-[1.45] text-text-secondary">
-      <p>
-        <span className="font-medium text-text-primary">{label}:</span>{" "}
-        {visibleWarnings.join(" ")}
-      </p>
-      <button
-        type="button"
-        onClick={() => setDismissed(true)}
-        className="shrink-0 rounded-full p-0.5 text-text-tertiary hover:bg-bg-hover hover:text-text-primary"
-        aria-label="Dismiss setup warning"
-      >
-        <X size={14} strokeWidth={1.75} />
-      </button>
-    </div>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/*  Shared chrome                                                              */
-/* -------------------------------------------------------------------------- */
-
-interface ProjectHeaderProps {
-  project: Project;
-  right?: React.ReactNode;
-}
-
-function ProjectHeader({ project, right }: ProjectHeaderProps) {
-  return (
-    <header
-      className={cn(
-        "flex items-start justify-between gap-6 border-b border-[color:var(--border-default)]",
-        "bg-bg-primary/95 px-8 pb-4 pt-6 backdrop-blur",
-      )}
-    >
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <h1 className="line-clamp-1 max-w-[760px] font-sans text-[22px] font-medium tracking-[-0.01em] text-text-primary">
-            {project.title}
-          </h1>
-          <span
-            className={cn(
-              "rounded-full px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.06em]",
-              project.status === "ready"
-                ? "bg-[color:var(--accent-subtle)] text-accent"
-                : "bg-bg-hover text-text-secondary",
-            )}
-          >
-            {STATUS_LABEL[project.status]}
-          </span>
-          <span className="text-[11.5px] text-text-tertiary">
-            · {formatRelativeTime(project.updatedAt)}
-          </span>
-        </div>
-        {project.description ? (
-          <p className="mt-1 line-clamp-1 max-w-[760px] text-[12.5px] leading-[1.4] text-text-secondary">
-            {project.description}
-          </p>
-        ) : null}
-      </div>
-
-      {right ? <div className="shrink-0">{right}</div> : null}
-    </header>
   );
 }
 
@@ -912,7 +977,7 @@ function BuildTimelineButton({ onGenerate, large = false }: { onGenerate: () => 
         "inline-flex items-center gap-1.5 bg-accent font-medium text-white shadow-sm",
         "transition-colors duration-[var(--duration-fast)] hover:bg-accent-hover",
         large
-          ? "rounded-full px-6 py-3 text-[15px]"
+          ? "rounded-sm px-6 py-3 text-[15px]"
           : "rounded-sm px-3.5 py-1.5 text-[13px]",
       )}
     >

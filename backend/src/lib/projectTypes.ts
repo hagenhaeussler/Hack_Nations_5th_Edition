@@ -223,6 +223,75 @@ export interface FinalPlanResource {
   estimated_price?: number | null;
 }
 
+export type SupplierId =
+  | "thermo_fisher"
+  | "sigma_aldrich"
+  | "promega"
+  | "qiagen"
+  | "idt"
+  | "market_estimate";
+
+export interface SupplierDirectoryEntry {
+  supplier_id: SupplierId;
+  name: string;
+  homepage_url: string;
+  resource_url: string;
+  focus: string;
+}
+
+export interface SupplierCandidate {
+  candidate_id: string;
+  supplier_id: SupplierId;
+  supplier_name: string;
+  title: string;
+  url: string;
+  snippet: string;
+  result_type: "product" | "tool" | "protocol" | "technical_document" | "search";
+  is_pdf: boolean;
+  is_verified_supplier: boolean;
+  estimated_price: number | null;
+  confidence: FinalPlanConfidence;
+  score: number | null;
+}
+
+export type ResourceDecisionStatus =
+  | "needs_review"
+  | "buy"
+  | "substitute"
+  | "already_available";
+
+export interface ResourceTaskReference {
+  task_id: string;
+  title: string;
+  scheduled_date: string | null;
+}
+
+export interface ProcurementResourceItem extends FinalPlanResource {
+  resource_id: string;
+  category: "reagent" | "antibody" | "kit" | "primer" | "consumable" | "equipment" | "service" | "other";
+  decision_status: ResourceDecisionStatus;
+  decision_prompt: string;
+  source_tasks: ResourceTaskReference[];
+  supplier_candidates: SupplierCandidate[];
+  recommended_supplier: SupplierCandidate | null;
+  estimated_unit_price: number | null;
+  price_basis: string;
+}
+
+export interface ProcurementReport {
+  project_id: string;
+  plan_id: string;
+  generated_at: string;
+  mode: "tavily" | "fallback";
+  warnings: string[];
+  suppliers: SupplierDirectoryEntry[];
+  resources: ProcurementResourceItem[];
+  decisions_required: Array<{
+    resource_id: string;
+    question: string;
+  }>;
+}
+
 export interface FinalPlanCitation {
   document_id: string;
   location: string;

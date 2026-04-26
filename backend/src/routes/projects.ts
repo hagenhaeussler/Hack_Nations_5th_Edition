@@ -15,6 +15,7 @@ import { logger } from "../lib/logger.js";
 import type { PlanEditRequest, WorkflowNode } from "../lib/projectTypes.js";
 import { getProjectsRepo } from "../lib/projectsRepo.js";
 import { upload } from "../lib/uploads.js";
+import { buildProcurementReport } from "../services/supplierSearchProvider.js";
 
 const router: Router = Router();
 const repo = getProjectsRepo();
@@ -275,6 +276,44 @@ router.get("/:id", async (req: Request, res: Response) => {
     return;
   }
   res.json({ ok: true, project, warnings: project.setup_warnings ?? getSetupWarnings() });
+});
+
+router.get("/:id/resources", async (req: Request, res: Response) => {
+  const id = paramId(req.params.id);
+  if (!id) {
+    res.status(400).json({ ok: false, error: "Missing project id." });
+    return;
+  }
+  const project = await repo.get(id);
+  if (!project) {
+    res.status(404).json({ ok: false, error: "Project not found." });
+    return;
+  }
+  if (!project.finalPlan) {
+    res.status(409).json({
+      ok: false,
+      error: "Generate a research plan before opening resources.",
+    });
+    return;
+  }
+  try {
+    const procurement = await buildProcurementReport(project);
+    res.json({
+      ok: true,
+      procurement,
+      warnings: [
+        ...(project.setup_warnings ?? getSetupWarnings()),
+        ...procurement.warnings,
+      ],
+    });
+  } catch (err) {
+    sendRouteError(res, err, {
+      route: "GET /api/projects/:id/resources",
+      stage: "building supplier resource report",
+      requestId: randomUUID(),
+      projectId: id,
+    });
+  }
 });
 
 /**

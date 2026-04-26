@@ -45,6 +45,8 @@ export interface WorkflowNodeData extends Record<string, unknown> {
   citationsToPaper: string[];
   procedure: string;
   validationCriteria: string[];
+  resourceSummary?: string;
+  evidenceSummary?: string;
   startDate: string;
   parentIds: string[];
   childrenIds: string[];

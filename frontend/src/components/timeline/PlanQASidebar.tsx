@@ -257,7 +257,7 @@ export function PlanQASidebar({
                           type="button"
                           onClick={() => onAction(action)}
                           className={cn(
-                            "rounded-full border border-[color:var(--border-default)] px-2 py-1",
+                            "rounded-sm border border-[color:var(--border-default)] px-2 py-1",
                             "text-[11px] font-medium text-text-secondary transition-colors",
                             "hover:border-[color:var(--accent)] hover:bg-[color:var(--accent-subtle)] hover:text-accent",
                           )}

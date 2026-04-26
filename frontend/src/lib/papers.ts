@@ -16,6 +16,7 @@ export interface Paper {
   similarity: number;
   abstract: string;
   url?: string;
+  /** Direct link to a PDF, used by the detail drawer's preview. */
   pdfUrl?: string;
   provider?: string;
   novelty_relation?: string;
@@ -31,47 +32,66 @@ export function similarityLabel(score: number): string {
   return "Loosely related";
 }
 
-const RELEVANCE_STOP_WORDS = new Set([
-  "about",
-  "after",
-  "against",
-  "and",
-  "between",
-  "from",
-  "into",
-  "that",
-  "the",
-  "their",
-  "this",
-  "through",
-  "using",
-  "with",
-  "would",
-]);
-
-function extractKeywords(value: string): string[] {
-  const words = value
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, " ")
-    .split(/\s+/)
-    .map((word) => word.trim())
-    .filter((word) => word.length > 3 && !RELEVANCE_STOP_WORDS.has(word));
-  return [...new Set(words)];
+/**
+ * Build a short, human-readable explanation of why `paper` is relevant to
+ * `hypothesis`. We don't have a model handy on the client, so this stitches
+ * together the strongest non-obvious signal we already have: a couple of
+ * overlap keywords between the hypothesis and the abstract/title. The numeric
+ * score is already displayed elsewhere, so repeating it here adds noise.
+ */
+export function buildPaperRelevanceExplanation(
+  paper: Paper,
+  hypothesis: string,
+): string {
+  const overlap = sharedKeywords(hypothesis, paper.abstract, paper.title);
+  return overlap.length
+    ? `It overlaps your hypothesis on ${formatList(overlap)}.`
+    : "";
 }
 
-export function buildPaperRelevanceExplanation(paper: Paper, hypothesis: string): string {
-  const promptKeywords = extractKeywords(hypothesis);
-  const paperText = `${paper.title} ${paper.abstract}`;
-  const paperKeywords = new Set(extractKeywords(paperText));
-  const sharedKeywords = promptKeywords
-    .filter((keyword) => paperKeywords.has(keyword))
-    .slice(0, 5);
-  const similarity = Math.round(paper.similarity * 100);
-  const relation = similarityLabel(paper.similarity).toLowerCase();
+function sharedKeywords(
+  hypothesis: string,
+  ...corpora: string[]
+): string[] {
+  const hypothesisTokens = tokenize(hypothesis);
+  if (hypothesisTokens.size === 0) return [];
 
-  if (sharedKeywords.length > 0) {
-    return `This paper is ${relation} to the input hypothesis with ${similarity}% semantic relevance, especially around ${sharedKeywords.join(", ")}.`;
+  const corpusTokens = new Set<string>();
+  for (const text of corpora) {
+    for (const token of tokenize(text)) corpusTokens.add(token);
   }
 
-  return `This paper is ${relation} to the input hypothesis with ${similarity}% semantic relevance based on the semantic search over its title and abstract.`;
+  const shared: string[] = [];
+  for (const token of hypothesisTokens) {
+    if (corpusTokens.has(token)) shared.push(token);
+    if (shared.length >= 3) break;
+  }
+  return shared;
+}
+
+const STOPWORDS = new Set([
+  "the", "and", "for", "with", "that", "this", "from", "into", "onto", "than",
+  "then", "have", "has", "had", "are", "was", "were", "but", "not", "all",
+  "any", "can", "may", "use", "uses", "used", "via", "per", "such", "their",
+  "they", "them", "our", "your", "you", "how", "why", "what", "when", "where",
+  "which", "who", "whom", "whose", "about", "above", "below", "after", "before",
+  "between", "during", "without", "within", "while", "also", "more", "most",
+  "much", "many", "some", "few", "one", "two", "three",
+]);
+
+function tokenize(text: string): Set<string> {
+  const tokens = new Set<string>();
+  for (const raw of text.toLowerCase().split(/[^a-z0-9]+/)) {
+    if (raw.length < 4) continue;
+    if (STOPWORDS.has(raw)) continue;
+    tokens.add(raw);
+  }
+  return tokens;
+}
+
+function formatList(items: string[]): string {
+  if (items.length === 0) return "";
+  if (items.length === 1) return `"${items[0]}"`;
+  if (items.length === 2) return `"${items[0]}" and "${items[1]}"`;
+  return `"${items.slice(0, -1).join('", "')}", and "${items[items.length - 1]}"`;
 }

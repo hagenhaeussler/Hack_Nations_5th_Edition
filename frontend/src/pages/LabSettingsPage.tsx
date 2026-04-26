@@ -5,6 +5,7 @@ import {
   FileText,
   Plus,
   SlidersHorizontal,
+  Upload,
   X,
 } from "lucide-react";
 import { useState } from "react";
@@ -29,7 +30,7 @@ export function LabSettingsPage() {
     <main className="relative flex min-h-screen flex-col">
       <section
         aria-label="Lab settings"
-        className="mx-auto flex w-full max-w-[var(--chat-max-width)] flex-1 flex-col gap-8 px-6 pb-24 pt-12 sm:px-8"
+        className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-8 px-6 pb-24 pt-12 sm:px-8"
       >
         <BackBar onBack={goBack} />
 
@@ -38,29 +39,31 @@ export function LabSettingsPage() {
           onChange={lab.setLabName}
         />
 
-        <Section
-          title="Equipment"
-          subtitle="Instruments and hardware your lab can run protocols on."
-          icon={<Beaker size={14} strokeWidth={1.5} />}
-        >
-          <EquipmentSection lab={lab} />
-        </Section>
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Section
+            title="Parameters"
+            subtitle="Capabilities and access controls that constrain experiment plans."
+            icon={<SlidersHorizontal size={14} strokeWidth={1.5} />}
+          >
+            <ParametersSection lab={lab} />
+          </Section>
 
-        <Section
-          title="Lab sheets"
-          subtitle="Standing protocols, SOPs, and reference sheets LabPilot can pull from."
-          icon={<FileText size={14} strokeWidth={1.5} />}
-        >
-          <SheetsSection lab={lab} />
-        </Section>
+          <Section
+            title="Lab equipment"
+            subtitle="Instruments and hardware your lab can run protocols on."
+            icon={<Beaker size={14} strokeWidth={1.5} />}
+          >
+            <EquipmentSection lab={lab} />
+          </Section>
 
-        <Section
-          title="Parameters"
-          subtitle="Capabilities and access controls that constrain experiment plans."
-          icon={<SlidersHorizontal size={14} strokeWidth={1.5} />}
-        >
-          <ParametersSection lab={lab} />
-        </Section>
+          <Section
+            title="Lab sheets and documents"
+            subtitle="Upload SOPs, reference sheets, and files LabPilot should know about."
+            icon={<FileText size={14} strokeWidth={1.5} />}
+          >
+            <SheetsSection lab={lab} />
+          </Section>
+        </div>
       </section>
 
       <footer className="px-8 pb-6 pt-2 text-center text-[12px] text-text-tertiary">
@@ -131,8 +134,8 @@ interface SectionProps {
 
 function Section({ title, subtitle, icon, children }: SectionProps) {
   return (
-    <section className="flex flex-col gap-3">
-      <header className="flex items-baseline justify-between gap-4 border-b border-[color:var(--border-default)] pb-2">
+    <section className="flex h-full min-h-[420px] flex-col gap-4 rounded-xl border border-[color:var(--border-default)] bg-bg-surface/80 p-4 shadow-sm">
+      <header className="flex flex-col gap-2 border-b border-[color:var(--border-default)] pb-3">
         <div className="flex items-center gap-2">
           <span className="flex h-5 w-5 items-center justify-center text-text-tertiary">
             {icon}
@@ -142,13 +145,13 @@ function Section({ title, subtitle, icon, children }: SectionProps) {
           </h2>
         </div>
         {subtitle ? (
-          <p className="hidden max-w-[44ch] text-right text-[12px] text-text-secondary sm:block">
+          <p className="text-[12px] leading-5 text-text-secondary">
             {subtitle}
           </p>
         ) : null}
       </header>
 
-      <div>{children}</div>
+      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
     </section>
   );
 }
@@ -169,11 +172,11 @@ function EquipmentSection({ lab }: { lab: UseLabSettings }) {
   };
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       {lab.settings.equipment.length === 0 ? (
         <EmptyHint>No equipment yet. Add the instruments your lab can use.</EmptyHint>
       ) : (
-        <ul className="flex flex-col gap-2">
+        <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
           {lab.settings.equipment.map((item) => (
             <EquipmentRow
               key={item.id}
@@ -184,7 +187,7 @@ function EquipmentSection({ lab }: { lab: UseLabSettings }) {
         </ul>
       )}
 
-      <div className="flex flex-col gap-2 sm:flex-row">
+      <div className="mt-auto flex flex-col gap-2">
         <FieldInput
           value={name}
           onChange={setName}
@@ -228,25 +231,29 @@ function EquipmentRow({
 /* -------------------------------------------------------------------------- */
 
 function SheetsSection({ lab }: { lab: UseLabSettings }) {
-  const [name, setName] = useState("");
-  const [reference, setReference] = useState("");
-
-  const submit = () => {
-    if (!name.trim()) return;
-    lab.addSheet({ name, reference });
-    setName("");
-    setReference("");
+  const uploadDocuments = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files ?? []);
+    files.forEach((file) => {
+      lab.addSheet({
+        name: file.name,
+        reference: file.name,
+        fileSize: file.size,
+        mimeType: file.type,
+        uploadedAt: new Date().toISOString(),
+      });
+    });
+    event.currentTarget.value = "";
   };
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       {lab.settings.sheets.length === 0 ? (
         <EmptyHint>
-          No lab sheets yet. Add SOPs or reference protocols you want LabPilot to
-          assume.
+          No documents yet. Upload SOPs, lab sheets, or reference protocols you
+          want LabPilot to assume.
         </EmptyHint>
       ) : (
-        <ul className="flex flex-col gap-2">
+        <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
           {lab.settings.sheets.map((sheet) => (
             <SheetRow
               key={sheet.id}
@@ -257,21 +264,23 @@ function SheetsSection({ lab }: { lab: UseLabSettings }) {
         </ul>
       )}
 
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <FieldInput
-          value={name}
-          onChange={setName}
-          placeholder="Sheet name (e.g. Western blot SOP)"
-          onSubmit={submit}
+      <label className="mt-auto flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-[color:var(--border-default)] bg-bg-input px-4 py-5 text-center transition-colors duration-[var(--duration-fast)] hover:border-[color:var(--border-strong)] hover:bg-bg-hover">
+        <input
+          type="file"
+          multiple
+          className="sr-only"
+          onChange={uploadDocuments}
         />
-        <FieldInput
-          value={reference}
-          onChange={setReference}
-          placeholder="Reference URL or filename — optional"
-          onSubmit={submit}
-        />
-        <AddButton onClick={submit} disabled={!name.trim()} label="Add sheet" />
-      </div>
+        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-accent-subtle text-accent">
+          <Upload size={18} strokeWidth={1.75} />
+        </span>
+        <span className="text-[13px] font-medium text-text-primary">
+          Upload lab documents
+        </span>
+        <span className="max-w-[28ch] text-[12px] leading-5 text-text-secondary">
+          Choose SOPs, lab sheets, PDFs, spreadsheets, images, or notes.
+        </span>
+      </label>
     </div>
   );
 }
@@ -284,11 +293,25 @@ function SheetRow({
   onRemove: () => void;
 }) {
   const isUrl = sheet.reference?.startsWith("http");
+  const documentMeta = [
+    typeof sheet.fileSize === "number" ? formatFileSize(sheet.fileSize) : undefined,
+    sheet.mimeType,
+  ]
+    .filter(Boolean)
+    .join(" / ");
+
   return (
     <li className="flex items-center justify-between gap-3 rounded-md border border-[color:var(--border-default)] bg-bg-surface px-3.5 py-2.5">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-bg-hover text-text-tertiary">
+        <FileText size={15} strokeWidth={1.5} />
+      </span>
       <div className="min-w-0 flex-1">
         <p className="truncate text-[14px] text-text-primary">{sheet.name}</p>
-        {sheet.reference ? (
+        {documentMeta ? (
+          <p className="truncate text-[12px] text-text-secondary">
+            {documentMeta}
+          </p>
+        ) : sheet.reference ? (
           isUrl ? (
             <a
               href={sheet.reference}
@@ -325,8 +348,8 @@ function ParametersSection({ lab }: { lab: UseLabSettings }) {
   };
 
   return (
-    <div className="flex flex-col gap-3">
-      <ul className="flex flex-col gap-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
         {lab.settings.parameters.map((param) => (
           <ParameterRow
             key={param.id}
@@ -337,7 +360,7 @@ function ParametersSection({ lab }: { lab: UseLabSettings }) {
         ))}
       </ul>
 
-      <div className="flex flex-col gap-2 sm:flex-row">
+      <div className="mt-auto flex flex-col gap-2">
         <FieldInput
           value={name}
           onChange={setName}
@@ -502,4 +525,11 @@ function EmptyHint({ children }: { children: React.ReactNode }) {
       {children}
     </p>
   );
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kilobytes = bytes / 1024;
+  if (kilobytes < 1024) return `${kilobytes.toFixed(1)} KB`;
+  return `${(kilobytes / 1024).toFixed(1)} MB`;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Beaker,
   BookOpen,
@@ -40,17 +40,18 @@ const ICON_MAP: Record<WorkflowIconKey, LucideIcon> = {
   "clipboard-check": ClipboardCheck,
 };
 
-const STATUS_LABEL: Record<WorkflowStatus, string> = {
-  done: "Completed",
-  active: "In progress",
-  upcoming: "Upcoming",
-};
-
 const ARRAY_FIELDS = [
   ["people", "People"],
   ["equipment", "Equipment"],
   ["materials", "Materials"],
   ["experts", "Experts"],
+  ["citationsToPaper", "Citations to paper"],
+  ["validationCriteria", "Validation criteria"],
+] as const;
+
+const RESOURCE_FIELDS = ARRAY_FIELDS.slice(0, 3);
+const EXPERT_FIELDS = [["experts", "Experts"]] as const;
+const EVIDENCE_FIELDS = [
   ["citationsToPaper", "Citations to paper"],
   ["validationCriteria", "Validation criteria"],
 ] as const;
@@ -73,6 +74,8 @@ interface Draft {
   citationsToPaper: string;
   procedure: string;
   validationCriteria: string;
+  resourceSummary: string;
+  evidenceSummary: string;
   startDate: string;
   parentIds: string;
   childrenIds: string;
@@ -115,13 +118,15 @@ function dataToDraft(data: WorkflowNodeData): Draft {
     experts: joinLines(data.experts ?? []),
     citationsToPaper: joinLines(data.citationsToPaper ?? []),
     validationCriteria: joinLines(data.validationCriteria ?? legacy.checklist ?? []),
+    resourceSummary: typeof data.resourceSummary === "string" ? data.resourceSummary : "",
+    evidenceSummary: typeof data.evidenceSummary === "string" ? data.evidenceSummary : "",
     parentIds: joinLines(data.parentIds ?? []),
     childrenIds: joinLines(data.childrenIds ?? []),
   };
 }
 
-function draftToData(draft: Draft): WorkflowNodeData {
-  return {
+function draftToData(draft: Draft, previousData: WorkflowNodeData): WorkflowNodeData {
+  const next: WorkflowNodeData = {
     ...draft,
     status: draft.status ?? "upcoming",
     icon: draft.icon ?? "beaker",
@@ -134,6 +139,20 @@ function draftToData(draft: Draft): WorkflowNodeData {
     parentIds: splitLines(draft.parentIds),
     childrenIds: splitLines(draft.childrenIds),
   };
+
+  if (draft.resourceSummary.trim() || typeof previousData.resourceSummary === "string") {
+    next.resourceSummary = draft.resourceSummary;
+  } else {
+    delete next.resourceSummary;
+  }
+
+  if (draft.evidenceSummary.trim() || typeof previousData.evidenceSummary === "string") {
+    next.evidenceSummary = draft.evidenceSummary;
+  } else {
+    delete next.evidenceSummary;
+  }
+
+  return next;
 }
 
 export function WorkflowNodeDetailPanel({
@@ -141,17 +160,57 @@ export function WorkflowNodeDetailPanel({
   onChange,
   onClose,
 }: WorkflowNodeDetailPanelProps) {
+  const panelRef = useRef<HTMLElement | null>(null);
+  const closeTimeoutRef = useRef<number | null>(null);
+  const isClosingRef = useRef(false);
   const [draft, setDraft] = useState<Draft>(() => dataToDraft(data));
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [isVisible, setIsVisible] = useState(false);
   const status = draft.status ?? "upcoming";
   const icon = draft.icon ?? "beaker";
   const Icon = ICON_MAP[icon] ?? Beaker;
+
+  const closeWithAnimation = useCallback(() => {
+    if (isClosingRef.current) return;
+    isClosingRef.current = true;
+    setIsVisible(false);
+    closeTimeoutRef.current = window.setTimeout(onClose, 300);
+  }, [onClose]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setIsVisible(true));
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (closeTimeoutRef.current !== null) {
+        window.clearTimeout(closeTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     setDraft(dataToDraft(data));
     setDirty(false);
   }, [data]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") closeWithAnimation();
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const panel = panelRef.current;
+      if (!panel || !(event.target instanceof Node)) return;
+      if (!panel.contains(event.target)) closeWithAnimation();
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [closeWithAnimation]);
 
   const serializedDraft = useMemo(() => JSON.stringify(draft), [draft]);
 
@@ -163,7 +222,7 @@ export function WorkflowNodeDetailPanel({
   async function handleSave() {
     setSaving(true);
     try {
-      await onChange(draftToData(JSON.parse(serializedDraft) as Draft));
+      await onChange(draftToData(JSON.parse(serializedDraft) as Draft, data));
       setDirty(false);
     } finally {
       setSaving(false);
@@ -172,13 +231,15 @@ export function WorkflowNodeDetailPanel({
 
   return (
     <aside
+      ref={panelRef}
       role="complementary"
       aria-label={`${draft.stepName} details`}
       className={cn(
         "fixed inset-y-0 right-0 z-30 flex w-full flex-col",
         "border-l border-[color:var(--border-default)] bg-bg-surface shadow-lg",
         "lg:w-1/3",
-        "animate-slide-in-right",
+        "transform-gpu transition-transform duration-300 ease-in-out",
+        isVisible ? "translate-x-0" : "translate-x-full",
       )}
     >
       <header className="flex items-start gap-3 border-b border-[color:var(--border-default)] px-6 py-5">
@@ -194,23 +255,14 @@ export function WorkflowNodeDetailPanel({
         </span>
 
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <StatusDot status={status} />
-            <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-text-tertiary">
-              {STATUS_LABEL[status]}
-            </span>
-          </div>
-          <h2 className="mt-1 text-[18px] font-semibold leading-[1.3] tracking-[-0.01em] text-text-primary">
+          <h2 className="text-[18px] font-semibold leading-[1.3] tracking-[-0.01em] text-text-primary">
             {draft.stepName || "Untitled step"}
           </h2>
-          <p className="mt-1 text-[13px] leading-[1.55] text-text-secondary">
-            {draft.startDate} · {draft.timeEstimate}
-          </p>
         </div>
 
         <button
           type="button"
-          onClick={onClose}
+          onClick={closeWithAnimation}
           aria-label="Close details"
           className={cn(
             "flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-text-tertiary",
@@ -222,9 +274,9 @@ export function WorkflowNodeDetailPanel({
       </header>
 
       <div className="flex-1 overflow-y-auto px-6 py-5">
-        <Section title="Step">
+        <Section title="Basics">
           <TextField
-            label="Step Name"
+            label="Title"
             value={draft.stepName}
             onChange={(value) => updateField("stepName", value)}
           />
@@ -256,6 +308,7 @@ export function WorkflowNodeDetailPanel({
         <Section title="Procedure">
           <TextAreaField
             label="Procedure"
+            hideLabel
             minRows={5}
             value={draft.procedure}
             onChange={(value) => updateField("procedure", value)}
@@ -263,10 +316,27 @@ export function WorkflowNodeDetailPanel({
         </Section>
 
         <Section title="Resources">
-          {ARRAY_FIELDS.slice(0, 3).map(([field, label]) => (
+          <TextField
+            label="Resource summary"
+            value={draft.resourceSummary}
+            onChange={(value) => updateField("resourceSummary", value)}
+          />
+          {RESOURCE_FIELDS.map(([field, label]) => (
             <TextAreaField
               key={field}
               label={label}
+              value={draft[field]}
+              onChange={(value) => updateField(field, value)}
+            />
+          ))}
+        </Section>
+
+        <Section title="Experts">
+          {EXPERT_FIELDS.map(([field, label]) => (
+            <TextAreaField
+              key={field}
+              label={label}
+              hideLabel
               value={draft[field]}
               onChange={(value) => updateField(field, value)}
             />
@@ -274,7 +344,12 @@ export function WorkflowNodeDetailPanel({
         </Section>
 
         <Section title="Evidence">
-          {ARRAY_FIELDS.slice(3, 6).map(([field, label]) => (
+          <TextField
+            label="Evidence summary"
+            value={draft.evidenceSummary}
+            onChange={(value) => updateField("evidenceSummary", value)}
+          />
+          {EVIDENCE_FIELDS.map(([field, label]) => (
             <TextAreaField
               key={field}
               label={label}
@@ -284,16 +359,6 @@ export function WorkflowNodeDetailPanel({
           ))}
         </Section>
 
-        <Section title="Graph IDs">
-          {ARRAY_FIELDS.slice(6).map(([field, label]) => (
-            <TextAreaField
-              key={field}
-              label={label}
-              value={draft[field]}
-              onChange={(value) => updateField(field, value)}
-            />
-          ))}
-        </Section>
       </div>
 
       <footer className="flex items-center justify-between gap-3 border-t border-[color:var(--border-default)] px-6 py-3">
@@ -372,18 +437,26 @@ function TextAreaField({
   value,
   onChange,
   minRows = 3,
+  hideLabel = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   minRows?: number;
+  hideLabel?: boolean;
 }) {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-text-tertiary">
+      <span
+        className={cn(
+          "text-[11px] font-medium uppercase tracking-[0.06em] text-text-tertiary",
+          hideLabel && "sr-only",
+        )}
+      >
         {label}
       </span>
       <textarea
+        aria-label={hideLabel ? label : undefined}
         value={value}
         rows={minRows}
         onChange={(event) => onChange(event.currentTarget.value)}
@@ -397,16 +470,3 @@ function TextAreaField({
   );
 }
 
-function StatusDot({ status }: { status: WorkflowStatus }) {
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "block h-1.5 w-1.5 rounded-full",
-        status === "done" && "bg-text-tertiary",
-        status === "active" && "bg-accent",
-        status === "upcoming" && "border border-[color:var(--border-strong)]",
-      )}
-    />
-  );
-}
