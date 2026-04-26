@@ -85,7 +85,7 @@ export function LandingPage() {
         <div className="flex w-full flex-col items-center justify-end gap-8 pb-8 animate-fade-in">
           <header className="flex flex-col items-center gap-3 text-center">
             <h1 className="font-sans text-[34px] font-medium leading-[1.15] tracking-[-0.01em] text-text-primary sm:text-[40px]">
-              {greetingLine} What's your hypothesis?
+              {greetingLine} <br/>  What's your hypothesis?
             </h1>
             <p className="max-w-[52ch] text-[15px] leading-[1.6] text-text-secondary">
               Describe what you want to test. LabPilot will surface related
