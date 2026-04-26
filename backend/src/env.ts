@@ -17,7 +17,7 @@ export const env = {
   databaseUrl: process.env.DATABASE_URL ?? null,
   /**
    * How long the mocked research / generation calls "think" for, in ms.
-   * The product spec calls for ~10s; can be shortened via env for testing.
+   * The MVP spec calls for ~10s, so low local overrides are clamped back up.
    */
-  mockLatencyMs: toInt(process.env.MOCK_LATENCY_MS, 10_000),
+  mockLatencyMs: Math.max(toInt(process.env.MOCK_LATENCY_MS, 10_000), 10_000),
 } as const;

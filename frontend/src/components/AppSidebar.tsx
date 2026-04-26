@@ -1,13 +1,17 @@
 import {
+  BarChart3,
+  BookOpen,
   ChevronLeft,
-  ChevronRight,
   FlaskConical,
   FolderKanban,
+  Home,
+  Network,
   PenSquare,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
-import { NavLink } from "react-router-dom";
+import { useState } from "react";
+import { NavLink, useMatch } from "react-router-dom";
 
 import { LogoMark } from "@/components/LogoMark";
 import { cn } from "@/lib/utils";
@@ -48,15 +52,40 @@ const SETTINGS_NAV: NavItem[] = [
  * `AppShell` keeps in sync.
  */
 export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
+  const [hoverPreview, setHoverPreview] = useState(false);
+  const projectMatch = useMatch("/projects/:id/*");
+  const projectId = projectMatch?.params.id;
+  const expanded = !collapsed || hoverPreview;
+
+  const primaryNav: NavItem[] = projectId
+    ? [
+        { to: "/", label: "New Project", icon: Home, end: true },
+        { to: `/projects/${projectId}/graph`, label: "Graph", icon: Network },
+        {
+          to: `/projects/${projectId}/statistics`,
+          label: "Statistics",
+          icon: BarChart3,
+        },
+        {
+          to: `/projects/${projectId}/literature`,
+          label: "Literature",
+          icon: BookOpen,
+        },
+      ]
+    : PRIMARY_NAV;
+
   return (
     <aside
       role="navigation"
       aria-label="Main navigation"
-      data-collapsed={collapsed || undefined}
+      data-collapsed={!expanded || undefined}
+      onMouseLeave={() => setHoverPreview(false)}
       className={cn(
         "fixed inset-y-0 left-0 z-30 flex flex-col border-r border-[color:var(--border-default)]",
         "bg-bg-sidebar transition-[width] duration-[var(--duration-normal)] ease-[var(--ease-default)]",
-        collapsed ? "w-[var(--sidebar-collapsed-width)]" : "w-[var(--sidebar-width)]",
+        expanded
+          ? "w-[var(--sidebar-width)]"
+          : "w-[var(--sidebar-collapsed-width)]",
       )}
     >
       {/* Brand row + collapse toggle */}
@@ -64,28 +93,31 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
         <NavLink
           to="/"
           aria-label="Return to LabPilot home"
+          onMouseEnter={() => {
+            if (collapsed) setHoverPreview(true);
+          }}
           className={cn(
             "flex min-w-0 flex-1 items-center gap-2.5 rounded-sm px-2 py-1 text-text-primary",
             "transition-colors duration-[var(--duration-fast)] hover:bg-[color:var(--bg-hover)]",
           )}
         >
           <LogoMark size={22} />
-          {!collapsed && (
+          {expanded && (
             <span className="select-none truncate font-sans text-[16px] font-light tracking-[0.06em]">
               LabPilot
             </span>
           )}
         </NavLink>
 
-        {!collapsed && (
-          <CollapseButton collapsed={collapsed} onToggle={onToggle} />
+        {expanded && !collapsed && (
+          <CollapseButton onToggle={onToggle} />
         )}
       </div>
 
       {/* Primary nav */}
       <nav aria-label="Sections" className="flex flex-col gap-0.5 px-2 pt-2">
-        {PRIMARY_NAV.map((item) => (
-          <SidebarLink key={item.to} item={item} collapsed={collapsed} />
+        {primaryNav.map((item) => (
+          <SidebarLink key={item.to} item={item} collapsed={!expanded} />
         ))}
       </nav>
 
@@ -97,13 +129,8 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
         className="flex flex-col gap-0.5 border-t border-[color:var(--border-default)] px-2 py-3"
       >
         {SETTINGS_NAV.map((item) => (
-          <SidebarLink key={item.to} item={item} collapsed={collapsed} />
+          <SidebarLink key={item.to} item={item} collapsed={!expanded} />
         ))}
-        {collapsed && (
-          <div className="mt-1 flex justify-center">
-            <CollapseButton collapsed={collapsed} onToggle={onToggle} />
-          </div>
-        )}
       </nav>
     </aside>
   );
@@ -153,24 +180,22 @@ function SidebarLink({ item, collapsed }: SidebarLinkProps) {
 }
 
 interface CollapseButtonProps {
-  collapsed: boolean;
   onToggle: () => void;
 }
 
-function CollapseButton({ collapsed, onToggle }: CollapseButtonProps) {
-  const Icon = collapsed ? ChevronRight : ChevronLeft;
+function CollapseButton({ onToggle }: CollapseButtonProps) {
   return (
     <button
       type="button"
       onClick={onToggle}
-      aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-      title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      aria-label="Collapse sidebar"
+      title="Collapse sidebar"
       className={cn(
         "flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-text-tertiary",
         "transition-colors duration-[var(--duration-fast)] hover:bg-[color:var(--bg-hover)] hover:text-text-primary",
       )}
     >
-      <Icon size={15} strokeWidth={1.5} />
+      <ChevronLeft size={15} strokeWidth={1.5} />
     </button>
   );
 }

@@ -1,13 +1,7 @@
-import {
-  ArrowLeft,
-  CalendarRange,
-  List,
-  Network,
-  Sparkles,
-} from "lucide-react";
+import { CalendarRange, Sparkles } from "lucide-react";
 import type { Edge, Node } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { PaperGraph } from "@/components/PaperGraph";
@@ -26,7 +20,11 @@ import {
 } from "@/lib/projects";
 import { cn } from "@/lib/utils";
 
-type Tab = "graph" | "statistics" | "literature";
+type ProjectPageSlug = "graph" | "statistics" | "literature";
+
+function isProjectPageSlug(value: string | undefined): value is ProjectPageSlug {
+  return value === "graph" || value === "statistics" || value === "literature";
+}
 
 /**
  * `/projects/:id` — single-project workspace.
@@ -43,7 +41,7 @@ type Tab = "graph" | "statistics" | "literature";
  * view in place — no extra navigation step, so back/forward stays clean.
  */
 export function ProjectPage() {
-  const { id } = useParams<{ id: string }>();
+  const { id, page } = useParams<{ id: string; page?: string }>();
   const navigate = useNavigate();
 
   const [state, setState] = useState<
@@ -105,6 +103,7 @@ export function ProjectPage() {
   }
 
   const { project } = state;
+  const activePage = isProjectPageSlug(page) ? page : null;
 
   if (generating || project.status === "generating") {
     return (
@@ -134,195 +133,75 @@ export function ProjectPage() {
   }
 
   if (project.status === "research-ready" || !project.workflow) {
+    if (!activePage) {
+      return <Navigate to={`/projects/${project.id}/graph`} replace />;
+    }
+
     return (
-      <ResearchView
+      <ProjectWorkspaceView
         project={project}
+        page={activePage}
         onGenerate={() => {
           void handleGenerate();
         }}
-        onBack={() => navigate("/")}
       />
     );
   }
 
+  if (!activePage) {
+    return <Navigate to={`/projects/${project.id}/graph`} replace />;
+  }
+
   return (
-    <WorkflowView
+    <ProjectWorkspaceView
       project={project}
       workflow={project.workflow}
-      onBack={() => navigate("/projects")}
+      page={activePage}
+      onGenerate={() => {
+        void handleGenerate();
+      }}
     />
   );
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Research view (status: research-ready)                                    */
-/* -------------------------------------------------------------------------- */
-
-interface ResearchViewProps {
-  project: Project;
-  onGenerate: () => void;
-  onBack: () => void;
-}
-
-function ResearchView({ project, onGenerate, onBack }: ResearchViewProps) {
-  const [view, setView] = useState<"graph" | "list">("graph");
-  const papers = project.papers ?? [];
-  const topSimilarity = papers[0]?.similarity ?? 0;
-
-  return (
-    <main className="flex min-h-screen flex-col">
-      <ProjectHeader
-        project={project}
-        onBack={onBack}
-        right={
-          <button
-            type="button"
-            onClick={onGenerate}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-sm bg-accent px-3.5 py-1.5 text-[13px] font-medium text-white",
-              "transition-colors duration-[var(--duration-fast)] hover:bg-accent-hover",
-            )}
-          >
-            <CalendarRange size={14} strokeWidth={1.75} />
-            Build experiment timeline
-          </button>
-        }
-      />
-
-      <section className="mx-auto flex w-full max-w-[1080px] flex-1 flex-col gap-5 px-8 py-8">
-        <header className="flex items-end justify-between gap-4">
-          <div>
-            <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
-              Related work
-            </p>
-            <h2 className="mt-1 font-sans text-[22px] font-medium tracking-[-0.01em] text-text-primary">
-              {papers.length} papers with similar experiments
-            </h2>
-            {papers.length > 0 ? (
-              <p className="mt-1 text-[12.5px] text-text-secondary">
-                Top match: {Math.round(topSimilarity * 100)}% similarity
-              </p>
-            ) : null}
-          </div>
-          <ViewToggle view={view} onChange={setView} />
-        </header>
-
-        <div className="rounded-md border border-[color:var(--border-default)] bg-bg-surface p-5 shadow-sm">
-          {papers.length === 0 ? (
-            <p className="py-12 text-center text-[13px] text-text-tertiary">
-              No related papers were returned. You can still build the timeline
-              from your hypothesis above.
-            </p>
-          ) : view === "graph" ? (
-            <div className="h-[420px]">
-              <PaperGraph prompt={project.hypothesis} papers={papers} />
-            </div>
-          ) : (
-            <PaperList papers={papers} />
-          )}
-        </div>
-      </section>
-    </main>
-  );
-}
-
-interface ViewToggleProps {
-  view: "graph" | "list";
-  onChange: (next: "graph" | "list") => void;
-}
-
-function ViewToggle({ view, onChange }: ViewToggleProps) {
-  return (
-    <div
-      role="tablist"
-      aria-label="View mode"
-      className={cn(
-        "inline-flex shrink-0 items-center rounded-full border border-[color:var(--border-default)] bg-bg-surface p-0.5",
-      )}
-    >
-      <ToggleButton
-        active={view === "graph"}
-        onClick={() => onChange("graph")}
-        icon={<Network size={13} strokeWidth={1.5} />}
-        label="Graph"
-      />
-      <ToggleButton
-        active={view === "list"}
-        onClick={() => onChange("list")}
-        icon={<List size={13} strokeWidth={1.5} />}
-        label="List"
-      />
-    </div>
-  );
-}
-
-interface ToggleButtonProps {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-}
-
-function ToggleButton({ active, onClick, icon, label }: ToggleButtonProps) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium",
-        "transition-colors duration-[var(--duration-fast)]",
-        active
-          ? "bg-bg-hover text-text-primary"
-          : "text-text-secondary hover:text-text-primary",
-      )}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/*  Workflow view (status: ready)                                             */
+/*  Project subpages                                                           */
 /* -------------------------------------------------------------------------- */
 
 interface WorkflowViewProps {
   project: Project;
-  workflow: Workflow;
-  onBack: () => void;
+  workflow?: Workflow;
+  page: ProjectPageSlug;
+  onGenerate: () => void;
 }
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "graph", label: "Graph" },
-  { id: "statistics", label: "Statistics" },
-  { id: "literature", label: "Literature" },
-];
-
-function WorkflowView({ project, workflow, onBack }: WorkflowViewProps) {
-  const [tab, setTab] = useState<Tab>("graph");
+function ProjectWorkspaceView({
+  project,
+  workflow,
+  page,
+  onGenerate,
+}: WorkflowViewProps) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   const flowNodes = useMemo<Node<WorkflowNodeData>[]>(
     () =>
-      workflow.nodes.map((n) => ({
+      (workflow?.nodes ?? []).map((n) => ({
         id: n.id,
         type: "workflow",
         position: n.position,
         data: n.data as WorkflowNodeData,
       })),
-    [workflow.nodes],
+    [workflow?.nodes],
   );
 
   const flowEdges = useMemo<Edge[]>(
     () =>
-      workflow.edges.map((e) => ({
+      (workflow?.edges ?? []).map((e) => ({
         id: e.id,
         source: e.source,
         target: e.target,
       })),
-    [workflow.edges],
+    [workflow?.edges],
   );
 
   const selectedNode = useMemo(
@@ -332,43 +211,20 @@ function WorkflowView({ project, workflow, onBack }: WorkflowViewProps) {
 
   const hasGraph = flowNodes.length > 0;
 
+  useEffect(() => {
+    if (page !== "graph") setSelectedNodeId(null);
+  }, [page]);
+
   return (
     <main className="relative flex h-screen min-h-0 flex-col overflow-hidden">
       <ProjectHeader
         project={project}
-        onBack={onBack}
         right={
-          <nav
-            role="tablist"
-            aria-label="Project view"
-            className="inline-flex shrink-0 items-center rounded-full border border-[color:var(--border-default)] bg-bg-surface p-0.5"
-          >
-            {TABS.map((t) => (
-              <button
-                key={t.id}
-                role="tab"
-                type="button"
-                aria-selected={tab === t.id}
-                onClick={() => {
-                  setTab(t.id);
-                  if (t.id !== "graph") setSelectedNodeId(null);
-                }}
-                className={cn(
-                  "rounded-full px-3 py-1 text-[12px] font-medium",
-                  "transition-colors duration-[var(--duration-fast)]",
-                  tab === t.id
-                    ? "bg-bg-hover text-text-primary"
-                    : "text-text-secondary hover:text-text-primary",
-                )}
-              >
-                {t.label}
-              </button>
-            ))}
-          </nav>
+          workflow ? null : <BuildTimelineButton onGenerate={onGenerate} />
         }
       />
 
-      {tab === "graph" ? (
+      {page === "graph" && workflow ? (
         <section className="relative min-h-[560px] flex-1 overflow-hidden bg-bg-primary">
           {hasGraph ? (
             <TimelineGraph
@@ -385,17 +241,23 @@ function WorkflowView({ project, workflow, onBack }: WorkflowViewProps) {
             </div>
           )}
         </section>
-      ) : tab === "statistics" ? (
-        <StatisticsView
-          prompt={project.hypothesis}
-          papers={project.papers ?? []}
-          workflow={workflow}
-        />
+      ) : page === "graph" ? (
+        <ResearchGraphPage project={project} onGenerate={onGenerate} />
+      ) : page === "statistics" ? (
+        workflow ? (
+          <StatisticsView
+            prompt={project.hypothesis}
+            papers={project.papers ?? []}
+            workflow={workflow}
+          />
+        ) : (
+          <GeneratePlaceholder onGenerate={onGenerate} />
+        )
       ) : (
         <LiteratureTab papers={project.papers ?? []} />
       )}
 
-      {tab === "graph" && selectedNode ? (
+      {page === "graph" && selectedNode ? (
         <WorkflowNodeDetailPanel
           key={selectedNode.id}
           data={selectedNode.data}
@@ -403,6 +265,69 @@ function WorkflowView({ project, workflow, onBack }: WorkflowViewProps) {
         />
       ) : null}
     </main>
+  );
+}
+
+function ResearchGraphPage({
+  project,
+  onGenerate,
+}: {
+  project: Project;
+  onGenerate: () => void;
+}) {
+  const papers = project.papers ?? [];
+  const topSimilarity = papers[0]?.similarity ?? 0;
+
+  return (
+    <section className="mx-auto flex w-full max-w-[1080px] flex-1 flex-col gap-5 overflow-y-auto px-8 py-8">
+      <header>
+        <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
+          Related work graph
+        </p>
+        <h2 className="mt-1 font-sans text-[22px] font-medium tracking-[-0.01em] text-text-primary">
+          {papers.length} papers with similar experiments
+        </h2>
+        {papers.length > 0 ? (
+          <p className="mt-1 text-[12.5px] text-text-secondary">
+            Top match: {Math.round(topSimilarity * 100)}% similarity
+          </p>
+        ) : null}
+      </header>
+
+      <div className="rounded-md border border-[color:var(--border-default)] bg-bg-surface p-5 shadow-sm">
+        {papers.length === 0 ? (
+          <p className="py-12 text-center text-[13px] text-text-tertiary">
+            No related papers were returned. You can still build the timeline
+            from your hypothesis.
+          </p>
+        ) : (
+          <div className="h-[420px]">
+            <PaperGraph prompt={project.hypothesis} papers={papers} />
+          </div>
+        )}
+      </div>
+
+      <div className="flex justify-end">
+        <BuildTimelineButton onGenerate={onGenerate} />
+      </div>
+    </section>
+  );
+}
+
+function GeneratePlaceholder({ onGenerate }: { onGenerate: () => void }) {
+  return (
+    <section className="flex flex-1 items-center justify-center px-8 py-24 text-center">
+      <div className="flex max-w-[42ch] flex-col items-center gap-3">
+        <h2 className="font-sans text-[22px] font-medium tracking-[-0.01em] text-text-primary">
+          Build the experiment timeline first
+        </h2>
+        <p className="text-[13px] leading-[1.55] text-text-secondary">
+          Statistics are generated from the workflow milestones, effort, and
+          related papers.
+        </p>
+        <BuildTimelineButton onGenerate={onGenerate} />
+      </div>
+    </section>
   );
 }
 
@@ -417,7 +342,7 @@ function LiteratureTab({ papers }: { papers: Paper[] }) {
     );
   }
   return (
-    <section className="mx-auto w-full max-w-[1080px] flex-1 px-8 py-8">
+    <section className="mx-auto w-full max-w-[1080px] flex-1 overflow-y-auto px-8 py-8">
       <header className="mb-4">
         <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
           Literature
@@ -437,11 +362,10 @@ function LiteratureTab({ papers }: { papers: Paper[] }) {
 
 interface ProjectHeaderProps {
   project: Project;
-  onBack: () => void;
   right?: React.ReactNode;
 }
 
-function ProjectHeader({ project, onBack, right }: ProjectHeaderProps) {
+function ProjectHeader({ project, right }: ProjectHeaderProps) {
   return (
     <header
       className={cn(
@@ -450,17 +374,6 @@ function ProjectHeader({ project, onBack, right }: ProjectHeaderProps) {
       )}
     >
       <div className="min-w-0 flex-1">
-        <button
-          type="button"
-          onClick={onBack}
-          className={cn(
-            "mb-2 inline-flex items-center gap-1.5 rounded-sm px-2 py-1 text-[12px] text-text-secondary",
-            "transition-colors duration-[var(--duration-fast)] hover:bg-bg-hover hover:text-text-primary",
-          )}
-        >
-          <ArrowLeft size={13} strokeWidth={1.5} />
-          Back
-        </button>
         <div className="flex items-center gap-2">
           <h1 className="font-sans text-[22px] font-medium tracking-[-0.01em] text-text-primary">
             {project.title}
@@ -491,6 +404,22 @@ function ProjectHeader({ project, onBack, right }: ProjectHeaderProps) {
 
       {right ? <div className="shrink-0">{right}</div> : null}
     </header>
+  );
+}
+
+function BuildTimelineButton({ onGenerate }: { onGenerate: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onGenerate}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-sm bg-accent px-3.5 py-1.5 text-[13px] font-medium text-white",
+        "transition-colors duration-[var(--duration-fast)] hover:bg-accent-hover",
+      )}
+    >
+      <CalendarRange size={14} strokeWidth={1.75} />
+      Build experiment timeline
+    </button>
   );
 }
 

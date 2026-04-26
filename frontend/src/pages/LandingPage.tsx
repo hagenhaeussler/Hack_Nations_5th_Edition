@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { LoadingScreen } from "@/components/LoadingScreen";
-import { ProjectsSection } from "@/components/ProjectsSection";
 import {
   PromptInput,
   type PromptSubmitPayload,
@@ -23,7 +22,7 @@ function getGreeting(): string {
  * `/` — landing screen.
  *
  * Two visual states:
- *   1. Idle: greeting + prompt + past projects below.
+ *   1. Idle: greeting + prompt.
  *   2. Researching: full-screen {@link LoadingScreen} while
  *      `startResearch()` is in flight (~10s). On success the user is taken
  *      to `/projects/:id`; on failure we drop back to idle with the prompt
@@ -51,7 +50,7 @@ export function LandingPage() {
 
     try {
       const project = await startResearch(hypothesis);
-      navigate(`/projects/${project.id}`);
+      navigate(`/projects/${project.id}/graph`);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       setError(message);
@@ -115,18 +114,6 @@ export function LandingPage() {
           </div>
         </div>
       </section>
-
-      <ProjectsSection />
-
-      {/* Page-edge fade — keeps the bottom of the projects grid soft so it
-       *  doesn't compete with the prompt above. */}
-      <div
-        aria-hidden
-        className={cn(
-          "pointer-events-none fixed bottom-0 left-[var(--sidebar-current-width)] right-0 z-10 h-36",
-          "bg-gradient-to-t from-[color:var(--bg-primary)] from-65% to-transparent",
-        )}
-      />
     </main>
   );
 }

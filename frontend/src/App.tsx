@@ -15,9 +15,9 @@ import { ProjectsListPage } from "@/pages/ProjectsListPage";
  *
  *   /                         → LandingPage          (prompt + past projects)
  *   /projects                 → ProjectsListPage     (all saved projects)
- *   /projects/:id             → ProjectPage          (research view OR
- *                                                     workflow view, driven
- *                                                     by `project.status`)
+ *   /projects/:id             → redirects to a project subpage
+ *   /projects/:id/:page       → ProjectPage          (graph / statistics /
+ *                                                     literature)
  *   /lab-settings             → LabSettingsPage
  *   /personal-settings        → PersonalSettingsPage
  *
@@ -30,6 +30,7 @@ export default function App() {
         <Route index element={<LandingPage />} />
         <Route path="projects" element={<ProjectsListPage />} />
         <Route path="projects/:id" element={<ProjectPage />} />
+        <Route path="projects/:id/:page" element={<ProjectPage />} />
         <Route path="lab-settings" element={<LabSettingsPage />} />
         <Route path="personal-settings" element={<PersonalSettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
