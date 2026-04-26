@@ -58,7 +58,7 @@ interface StatisticsViewProps {
  * §8 — warm cream surface, soft border, terracotta used only for accents.
  */
 export function StatisticsView({
-  prompt: _prompt,
+  prompt,
   papers,
   workflow,
   finalPlan,
@@ -99,19 +99,21 @@ export function StatisticsView({
       <CreatorStatsView
         report={currentReport}
         planId={planId}
+        fallbackHypothesis={prompt}
         onAnalyzeRisks={onAnalyzeRisks}
       />
     );
   }
 
   return (
-    <section className="flex-1 overflow-y-auto px-8 py-6">
-      <div className="mx-auto w-full max-w-[1180px]">
+    <section className="flex-1 overflow-y-auto bg-bg-primary px-6 py-6 sm:px-8">
+      <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-5">
+        <StatsPageHeader hypothesis={prompt} />
         <div
           className={cn(
             "grid gap-4",
-            "grid-cols-1 lg:grid-cols-6",
-            "lg:auto-rows-[minmax(140px,auto)]",
+            "grid-cols-1 md:grid-cols-2 xl:grid-cols-6",
+            "xl:auto-rows-[minmax(140px,auto)]",
           )}
         >
           <TimeTile
@@ -134,14 +136,26 @@ export function StatisticsView({
 function CreatorStatsView({
   report,
   planId,
+  fallbackHypothesis,
   onAnalyzeRisks,
 }: {
   report: ProjectStatsReport;
   planId: string | null;
+  fallbackHypothesis?: string;
   onAnalyzeRisks?: () => void;
 }) {
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const peopleCount = report.people_summary.length;
+  const taskCounts = useMemo(() => {
+    const counts: Record<WorkflowStatus, number> = {
+      done: 0,
+      active: 0,
+      upcoming: 0,
+    };
+    for (const task of report.task_summary) counts[task.status] += 1;
+    return counts;
+  }, [report.task_summary]);
 
   async function handleExportPdf() {
     if (!planId || exporting) return;
@@ -157,19 +171,13 @@ function CreatorStatsView({
   }
 
   return (
-    <section className="flex-1 overflow-y-auto px-8 py-6">
-      <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-4">
-        <header className="rounded-lg border border-[color:var(--border-default)] bg-bg-surface p-5 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
-                Creator Agent report
-              </p>
-              <h2 className="mt-1 font-sans text-[24px] font-medium tracking-[-0.01em] text-text-primary">
-                {report.experiment_goal}
-              </h2>
-            </div>
-            <div className="flex shrink-0 flex-wrap gap-2">
+    <section className="flex-1 overflow-y-auto bg-bg-primary px-6 py-6 sm:px-8">
+      <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-5">
+        <StatsPageHeader
+          hypothesis={report.hypothesis || fallbackHypothesis}
+          error={exportError}
+          actions={
+            <>
               {onAnalyzeRisks ? (
                 <button
                   type="button"
@@ -201,87 +209,57 @@ function CreatorStatsView({
                 )}
                 {exporting ? "Exporting..." : "Export PDF"}
               </button>
-            </div>
-          </div>
-          <p className="mt-2 max-w-[82ch] text-[13px] leading-[1.6] text-text-secondary">
-            {report.summary}
-          </p>
-          {exportError ? (
-            <p className="mt-2 text-[12px] text-red-700">{exportError}</p>
-          ) : null}
-        </header>
+            </>
+          }
+        />
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-6">
+        <div
+          className={cn(
+            "grid grid-cols-1 gap-4",
+            "md:grid-cols-2",
+            "xl:grid-cols-6 xl:auto-rows-[minmax(132px,auto)]",
+          )}
+        >
           <ReportMetricTile
             icon={<CalendarRange size={15} strokeWidth={1.5} />}
             eyebrow="Total time"
-            value={formatEstimate(report.total_estimated_duration)}
+            value={formatEstimateValue(report.total_estimated_duration)}
+            unit={formatEstimateUnit(report.total_estimated_duration)}
             detail={report.total_estimated_duration.basis}
-            className="lg:col-span-2"
+            className="md:col-span-1 xl:col-span-2"
           />
           <ReportMetricTile
             icon={<Banknote size={15} strokeWidth={1.5} />}
-            eyebrow="Budget"
+            eyebrow="Total budget"
             value={
               report.total_estimated_budget.value === null
                 ? "Unknown"
                 : formatUSD(report.total_estimated_budget.value)
             }
-            detail={report.total_estimated_budget.basis}
-            className="lg:col-span-2"
+            detail={formatBudgetDetail(report)}
+            className="md:col-span-1 xl:col-span-2"
           />
-          <ReportListTile
-            icon={<Users size={15} strokeWidth={1.5} />}
-            eyebrow="People"
-            title={`${report.people_summary.length} roles`}
-            items={report.people_summary}
-            className="lg:col-span-2"
+          <ReportPeopleTile
+            people={report.people_summary}
+            count={peopleCount}
+            className="md:col-span-2 xl:col-span-2"
           />
-          <ReportListTile
-            icon={<ClipboardList size={15} strokeWidth={1.5} />}
-            eyebrow="Tasks"
-            title={`${report.task_summary.length} scheduled tasks`}
-            items={report.task_summary.map(
-              (task) => `${task.step_name} · day ${task.start_day}`,
-            )}
-            className="lg:col-span-3"
+          <ReportTasksTile
+            tasks={report.task_summary}
+            summary={taskCounts}
+            className="md:col-span-2 xl:col-span-4 xl:row-span-3"
           />
-          <ReportListTile
-            icon={<CheckCircle2 size={15} strokeWidth={1.5} />}
-            eyebrow="Validation"
-            title={`${report.validation_criteria_summary.length} criteria`}
-            items={report.validation_criteria_summary}
-            className="lg:col-span-3"
+          <ReportValidationTile
+            criteria={report.validation_criteria_summary}
+            className="md:col-span-1 xl:col-span-2"
           />
-          <ReportListTile
-            icon={<BeakerIcon />}
-            eyebrow="Resources to buy or verify"
-            title={`${report.purchase_list.length} items`}
-            items={report.purchase_list.map(
-              (item) => `${item.name} · ${item.availability}`,
-            )}
-            className="lg:col-span-2"
+          <ReportResourcesTile
+            resources={report.purchase_list}
+            className="md:col-span-1 xl:col-span-2"
           />
-          <ReportListTile
-            icon={<ShieldIcon />}
-            eyebrow="Risks"
-            title={`${report.risk_summary.length} flagged`}
-            items={report.risk_summary.map(
-              (risk) => `${risk.severity}: ${risk.description}`,
-            )}
-            className="lg:col-span-2"
-          />
-          <ReportListTile
-            icon={<Sparkles size={15} strokeWidth={1.5} />}
-            eyebrow="Learnings and citations"
-            title="Influence summary"
-            items={[
-              ...report.learning_memory_summary,
-              ...report.citation_summary
-                .slice(0, 3)
-                .map((citation) => `${citation.document_id}: ${citation.location}`),
-            ]}
-            className="lg:col-span-2"
+          <ReportRisksTile
+            risks={report.risk_summary}
+            className="md:col-span-2 xl:col-span-2"
           />
         </div>
       </div>
@@ -289,36 +267,53 @@ function CreatorStatsView({
   );
 }
 
-function formatEstimate(estimate: ProjectStatsReport["total_estimated_duration"]): string {
-  return estimate.value === null ? `Unknown ${estimate.unit}` : `${estimate.value} ${estimate.unit}`;
+function formatEstimateValue(
+  estimate: ProjectStatsReport["total_estimated_duration"],
+): string {
+  return estimate.value === null ? "Unknown" : String(estimate.value);
 }
 
-function BeakerIcon() {
-  return <ClipboardList size={15} strokeWidth={1.5} />;
+function formatEstimateUnit(
+  estimate: ProjectStatsReport["total_estimated_duration"],
+): string | undefined {
+  return estimate.value === null ? estimate.unit : estimate.unit;
 }
 
-function ShieldIcon() {
-  return <CheckCircle2 size={15} strokeWidth={1.5} />;
+function formatBudgetDetail(report: ProjectStatsReport): string {
+  const pricedItems = report.purchase_list
+    .filter((item) => typeof item.estimated_price === "number" && item.estimated_price > 0)
+    .slice(0, 3);
+  if (pricedItems.length === 0) return report.total_estimated_budget.basis;
+  return pricedItems
+    .map((item) => `${formatUSD(item.estimated_price ?? 0, { compact: true })} ${item.name}`)
+    .join(" · ");
 }
 
 function ReportMetricTile({
   icon,
   eyebrow,
   value,
+  unit,
   detail,
   className,
 }: {
   icon: React.ReactNode;
   eyebrow: string;
   value: string;
+  unit?: string;
   detail: string;
   className?: string;
 }) {
   return (
-    <Tile className={className}>
+    <Tile className={cn("min-h-[140px]", className)}>
       <TileHeading icon={icon} eyebrow={eyebrow} />
       <p className="mt-auto font-sans text-[30px] font-light leading-none tracking-[-0.02em] text-text-primary">
         {value}
+        {unit ? (
+          <span className="ml-1.5 text-[13px] font-normal tracking-normal text-text-secondary">
+            {unit}
+          </span>
+        ) : null}
       </p>
       <p className="mt-2 line-clamp-2 text-[12px] leading-[1.45] text-text-secondary">
         {detail}
@@ -327,39 +322,296 @@ function ReportMetricTile({
   );
 }
 
-function ReportListTile({
-  icon,
-  eyebrow,
-  title,
-  items,
+function ReportTasksTile({
+  tasks,
+  summary,
   className,
 }: {
-  icon: React.ReactNode;
-  eyebrow: string;
-  title: string;
-  items: string[];
+  tasks: ProjectStatsReport["task_summary"];
+  summary: Record<WorkflowStatus, number>;
   className?: string;
 }) {
-  const topItems = items.slice(0, 6);
+  return (
+    <Tile className={cn("min-h-[300px] sm:min-h-[340px]", className)}>
+      <header className="mb-3 flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="flex h-7 w-7 items-center justify-center rounded-sm bg-bg-hover text-text-secondary">
+            <ClipboardList size={15} strokeWidth={1.5} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
+              All tasks
+            </p>
+            <p className="mt-0.5 text-[13px] font-medium text-text-primary">
+              {tasks.length} total
+            </p>
+          </div>
+        </div>
+        <div className="hidden items-center gap-3 text-[11px] text-text-secondary sm:flex">
+          <SummaryDot status="done" label={`${summary.done} done`} />
+          <SummaryDot status="active" label={`${summary.active} active`} />
+          <SummaryDot status="upcoming" label={`${summary.upcoming} upcoming`} />
+        </div>
+      </header>
+
+      {tasks.length > 0 ? (
+        <ol className="-mx-2 flex flex-1 flex-col">
+          {tasks.map((task, idx) => (
+            <li
+              key={task.node_id}
+              className={cn(
+                "flex items-center gap-3 rounded-sm px-2 py-2",
+                "transition-colors duration-[var(--duration-fast)] hover:bg-bg-hover",
+                idx !== 0 && "border-t border-[color:var(--border-default)]",
+              )}
+            >
+              <span className="w-6 shrink-0 text-[11px] font-medium tabular-nums text-text-tertiary">
+                {String(idx + 1).padStart(2, "0")}
+              </span>
+              <StatusDot status={task.status} />
+              <span className="min-w-0 flex-1 truncate text-[13px] text-text-primary">
+                {task.step_name}
+              </span>
+              <span className="shrink-0 text-[10.5px] font-medium uppercase tracking-[0.06em] text-text-tertiary">
+                {formatReportSchedule(task.start_day, task.end_day)}
+              </span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="text-[12.5px] text-text-tertiary">No scheduled tasks supplied.</p>
+      )}
+    </Tile>
+  );
+}
+
+function ReportPeopleTile({
+  people,
+  count,
+  className,
+}: {
+  people: string[];
+  count: number;
+  className?: string;
+}) {
   return (
     <Tile className={className}>
-      <TileHeading icon={icon} eyebrow={eyebrow} title={title} />
-      {topItems.length > 0 ? (
-        <ul className="mt-1 flex flex-col gap-1.5">
-          {topItems.map((item) => (
-            <li
-              key={item}
-              className="line-clamp-2 text-[12.5px] leading-[1.5] text-text-secondary"
-            >
-              {item}
+      <TileHeading
+        icon={<Users size={15} strokeWidth={1.5} />}
+        eyebrow="People involved"
+        title={`${count} contributor${count === 1 ? "" : "s"}`}
+      />
+      {people.length > 0 ? (
+        <ul className="mt-1 flex flex-col gap-2.5">
+          {people.slice(0, 6).map((person) => {
+            const { title, detail } = splitSummaryItem(person);
+            return (
+              <li key={person} className="flex items-start gap-2.5">
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
+                    "border border-[color:var(--border-default)] bg-bg-hover",
+                    "text-[10.5px] font-medium tracking-[0.04em] text-text-secondary",
+                  )}
+                >
+                  {initialsFromText(title)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13px] font-medium text-text-primary">
+                    {title}
+                  </p>
+                  {detail ? (
+                    <p className="mt-0.5 line-clamp-1 text-[11.5px] leading-[1.4] text-text-secondary">
+                      {detail}
+                    </p>
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="text-[12.5px] text-text-tertiary">No people supplied.</p>
+      )}
+    </Tile>
+  );
+}
+
+function ReportValidationTile({
+  criteria,
+  className,
+}: {
+  criteria: ProjectStatsReport["validation_criteria_summary"];
+  className?: string;
+}) {
+  return (
+    <Tile className={className}>
+      <TileHeading
+        icon={<CheckCircle2 size={15} strokeWidth={1.5} />}
+        eyebrow="Validation criteria"
+        title="What 'confirmed' means"
+      />
+      {criteria.length > 0 ? (
+        <ol className="mt-1 flex flex-col gap-2">
+          {criteria.slice(0, 5).map((criterion, idx) => (
+            <li key={criterion} className="flex items-start gap-2.5">
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full",
+                  "bg-bg-hover text-[9.5px] font-medium tabular-nums text-text-secondary",
+                )}
+              >
+                {idx + 1}
+              </span>
+              <p className="line-clamp-2 text-[12.5px] font-medium leading-[1.45] text-text-primary">
+                {criterion}
+              </p>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="text-[12.5px] text-text-tertiary">No validation criteria supplied.</p>
+      )}
+    </Tile>
+  );
+}
+
+function ReportResourcesTile({
+  resources,
+  className,
+}: {
+  resources: ProjectStatsReport["purchase_list"];
+  className?: string;
+}) {
+  return (
+    <Tile className={className}>
+      <TileHeading
+        icon={<ClipboardList size={15} strokeWidth={1.5} />}
+        eyebrow="Resources"
+        title={`${resources.length} to buy or verify`}
+      />
+      {resources.length > 0 ? (
+        <ul className="mt-1 flex flex-col gap-2">
+          {resources.slice(0, 5).map((resource) => (
+            <li key={`${resource.name}-${resource.availability}`} className="min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-[12.5px] font-medium text-text-primary">
+                  {resource.name}
+                </p>
+                <span className="shrink-0 rounded-full bg-bg-hover px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.04em] text-text-secondary">
+                  {formatAvailability(resource.availability)}
+                </span>
+              </div>
+              {resource.reason ? (
+                <p className="mt-0.5 line-clamp-1 text-[11.5px] leading-[1.4] text-text-secondary">
+                  {resource.reason}
+                </p>
+              ) : null}
             </li>
           ))}
         </ul>
       ) : (
-        <p className="text-[12.5px] text-text-tertiary">None supplied.</p>
+        <p className="text-[12.5px] text-text-tertiary">No purchase items supplied.</p>
       )}
     </Tile>
   );
+}
+
+function ReportRisksTile({
+  risks,
+  className,
+}: {
+  risks: ProjectStatsReport["risk_summary"];
+  className?: string;
+}) {
+  return (
+    <Tile className={className}>
+      <TileHeading
+        icon={<ShieldAlert size={15} strokeWidth={1.5} />}
+        eyebrow="Risks"
+        title={`${risks.length} flagged`}
+      />
+      {risks.length > 0 ? (
+        <ul className="mt-1 flex flex-col gap-2">
+          {risks.slice(0, 4).map((risk) => (
+            <li key={risk.risk_id} className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-accent-subtle px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.04em] text-accent">
+                  {risk.severity}
+                </span>
+                <p className="min-w-0 truncate text-[12.5px] font-medium text-text-primary">
+                  {risk.description}
+                </p>
+              </div>
+              <p className="mt-0.5 line-clamp-1 text-[11.5px] leading-[1.4] text-text-secondary">
+                {risk.mitigation}
+              </p>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-[12.5px] text-text-tertiary">No risks flagged.</p>
+      )}
+    </Tile>
+  );
+}
+
+function StatsPageHeader({
+  hypothesis,
+  actions,
+  error,
+}: {
+  hypothesis?: string;
+  actions?: React.ReactNode;
+  error?: string | null;
+}) {
+  return (
+    <header className="flex flex-wrap items-start justify-between gap-4 border-b border-[color:var(--border-default)] pb-5">
+      <div className="min-w-0">
+        <h1 className="font-sans text-[22px] font-medium tracking-[-0.01em] text-text-primary">
+          Project statistics
+        </h1>
+        <p className="mt-4 text-[10.5px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
+          Hypothesis
+        </p>
+        <p className="mt-1 max-w-[78ch] text-[13px] leading-[1.55] text-text-primary">
+          {hypothesis?.trim() || "No hypothesis provided."}
+        </p>
+        {error ? <p className="mt-2 text-[12px] text-red-700">{error}</p> : null}
+      </div>
+      {actions ? <div className="flex shrink-0 flex-wrap gap-2">{actions}</div> : null}
+    </header>
+  );
+}
+
+function formatReportSchedule(startDay: number, endDay: number): string {
+  if (startDay <= 0) return "Day 0";
+  const startWeek = Math.floor(startDay / 7) + 1;
+  const endWeek = Math.floor(Math.max(endDay, startDay) / 7) + 1;
+  return startWeek === endWeek ? `Week ${startWeek}` : `Week ${startWeek}-${endWeek}`;
+}
+
+function formatAvailability(value: string): string {
+  return value.replace(/_/g, " ");
+}
+
+function splitSummaryItem(item: string): { title: string; detail: string } {
+  const [title, ...rest] = item.split(/\s(?:·|-)\s|:\s/);
+  return {
+    title: title.trim() || item,
+    detail: rest.join(" · ").trim(),
+  };
+}
+
+function initialsFromText(value: string): string {
+  const words = value
+    .replace(/\bdr\.?\b/gi, "")
+    .match(/[A-Za-z]+/g);
+  if (!words || words.length === 0) return "??";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return `${words[0][0]}${words[words.length - 1][0]}`.toUpperCase();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -375,8 +627,8 @@ function Tile({ className, children }: TileProps) {
   return (
     <article
       className={cn(
-        "flex flex-col rounded-lg border border-[color:var(--border-default)] bg-bg-surface",
-        "p-5 shadow-sm transition-shadow duration-[var(--duration-fast)] hover:shadow-md",
+        "flex flex-col rounded-xl border border-[color:var(--border-default)] bg-bg-surface",
+        "p-5 shadow-sm",
         className,
       )}
     >
@@ -429,7 +681,7 @@ function TimeTile({
   taskCount,
 }: TimeTileProps) {
   return (
-    <Tile className="lg:col-span-2 lg:row-span-1">
+    <Tile className="md:col-span-1 xl:col-span-2 xl:row-span-1">
       <TileHeading
         icon={<CalendarRange size={15} strokeWidth={1.5} />}
         eyebrow="Total time"
@@ -457,7 +709,7 @@ interface BudgetTileProps {
 function BudgetTile({ total, lines }: BudgetTileProps) {
   const top = lines.slice(0, 3);
   return (
-    <Tile className="lg:col-span-2 lg:row-span-1">
+    <Tile className="md:col-span-1 xl:col-span-2 xl:row-span-1">
       <TileHeading
         icon={<Banknote size={15} strokeWidth={1.5} />}
         eyebrow="Total budget"
@@ -482,7 +734,7 @@ interface PeopleTileProps {
 
 function PeopleTile({ team }: PeopleTileProps) {
   return (
-    <Tile className="lg:col-span-2 lg:row-span-2">
+    <Tile className="md:col-span-2 xl:col-span-2 xl:row-span-2">
       <TileHeading
         icon={<Users size={15} strokeWidth={1.5} />}
         eyebrow="People involved"
@@ -532,7 +784,7 @@ function TasksTile({ tasks }: TasksTileProps) {
   }, [tasks]);
 
   return (
-    <Tile className="lg:col-span-4 lg:row-span-3">
+    <Tile className="md:col-span-2 xl:col-span-4 xl:row-span-3">
       <header className="mb-3 flex items-start justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className="flex h-7 w-7 items-center justify-center rounded-sm bg-bg-hover text-text-secondary">
@@ -622,7 +874,7 @@ interface ValidationTileProps {
 
 function ValidationTile({ criteria }: ValidationTileProps) {
   return (
-    <Tile className="lg:col-span-2 lg:row-span-1">
+    <Tile className="md:col-span-1 xl:col-span-2 xl:row-span-1">
       <TileHeading
         icon={<CheckCircle2 size={15} strokeWidth={1.5} />}
         eyebrow="Validation criteria"
@@ -661,7 +913,7 @@ interface ExpertsTileProps {
 
 function ExpertsTile({ experts }: ExpertsTileProps) {
   return (
-    <Tile className="lg:col-span-2 lg:row-span-1">
+    <Tile className="md:col-span-1 xl:col-span-2 xl:row-span-1">
       <TileHeading
         icon={<Sparkles size={15} strokeWidth={1.5} />}
         eyebrow="Domain experts"

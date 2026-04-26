@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 /**
- * Lab settings — equipment, lab sheets, and capability parameters.
+ * Lab settings — equipment, lab sheets/documents, and capability parameters.
  *
  * Persistence is local-only for now (localStorage). When the backend grows a
  * `/api/lab` endpoint, swap the persistence layer here without touching the
@@ -20,6 +20,9 @@ export interface LabSheet {
   name: string;
   /** Optional reference (URL or filename) — UI surfaces this as a hint. */
   reference?: string;
+  fileSize?: number;
+  mimeType?: string;
+  uploadedAt?: string;
 }
 
 export interface LabParameter {
@@ -78,7 +81,13 @@ export interface UseLabSettings {
   setLabName: (name: string) => void;
   addEquipment: (input: { name: string; notes?: string }) => void;
   removeEquipment: (id: string) => void;
-  addSheet: (input: { name: string; reference?: string }) => void;
+  addSheet: (input: {
+    name: string;
+    reference?: string;
+    fileSize?: number;
+    mimeType?: string;
+    uploadedAt?: string;
+  }) => void;
   removeSheet: (id: string) => void;
   addParameter: (name: string) => void;
   toggleParameter: (id: string) => void;
@@ -124,7 +133,19 @@ export function useLabSettings(): UseLabSettings {
   }, []);
 
   const addSheet = useCallback(
-    ({ name, reference }: { name: string; reference?: string }) => {
+    ({
+      name,
+      reference,
+      fileSize,
+      mimeType,
+      uploadedAt,
+    }: {
+      name: string;
+      reference?: string;
+      fileSize?: number;
+      mimeType?: string;
+      uploadedAt?: string;
+    }) => {
       const trimmed = name.trim();
       if (!trimmed) return;
       setSettings((s) => ({
@@ -135,6 +156,9 @@ export function useLabSettings(): UseLabSettings {
             id: makeId("sh"),
             name: trimmed,
             reference: reference?.trim() || undefined,
+            fileSize,
+            mimeType: mimeType?.trim() || undefined,
+            uploadedAt,
           },
         ],
       }));
