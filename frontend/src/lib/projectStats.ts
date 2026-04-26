@@ -24,21 +24,43 @@ export interface ProjectTime {
   taskCount: number;
 }
 
-/** Parses a schedule label like "Week 2", "Week 3–4", or "Day 0". */
-function parseScheduleEnd(label: string | undefined): number {
-  if (!label) return 0;
-  if (/day\s*0/i.test(label)) return 0;
-  const matches = label.match(/\d+/g);
-  if (!matches?.length) return 0;
-  return Math.max(...matches.map((n) => Number.parseInt(n, 10)));
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function parseDurationDays(label: string | undefined): number {
+  if (!label) return 1;
+  const normalized = label.toLowerCase();
+  const matches = normalized.match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+  const amount = matches.length > 0 ? Math.max(...matches) : 1;
+  if (normalized.includes("week")) return amount * 7;
+  if (normalized.includes("month")) return amount * 30;
+  if (normalized.includes("hour")) return Math.max(amount / 24, 0.25);
+  return amount;
+}
+
+function parseDate(value: string | undefined): number | null {
+  if (!value) return null;
+  const time = Date.parse(`${value}T00:00:00.000Z`);
+  return Number.isNaN(time) ? null : time;
 }
 
 export function getProjectTime(workflow: Workflow): ProjectTime {
   const nodes = workflow.nodes;
-  const ends = nodes.map((n) => parseScheduleEnd(n.data.schedule));
-  const totalWeeks = ends.length > 0 ? Math.max(...ends, 0) : 0;
-  const first = nodes[0]?.data.schedule ?? "Day 0";
-  const last = nodes[nodes.length - 1]?.data.schedule ?? `Week ${totalWeeks}`;
+  const starts = nodes
+    .map((node) => parseDate(node.data.startDate))
+    .filter((time): time is number => time !== null);
+  const firstStart = starts.length > 0 ? Math.min(...starts) : Date.now();
+  const lastEnd =
+    nodes.length > 0
+      ? Math.max(
+          ...nodes.map((node) => {
+            const start = parseDate(node.data.startDate) ?? firstStart;
+            return start + parseDurationDays(node.data.timeEstimate) * MS_PER_DAY;
+          }),
+        )
+      : firstStart;
+  const totalWeeks = Math.max(1, Math.ceil((lastEnd - firstStart) / MS_PER_DAY / 7));
+  const first = nodes[0]?.data.startDate ?? "Start";
+  const last = new Date(lastEnd).toISOString().slice(0, 10);
   return {
     totalWeeks,
     startLabel: first,
@@ -153,9 +175,9 @@ export interface ProjectTask {
 export function getProjectTasks(workflow: Workflow): ProjectTask[] {
   return workflow.nodes.map((n: WorkflowNode) => ({
     id: n.id,
-    title: n.data.title,
-    schedule: n.data.schedule,
-    status: n.data.status,
+    title: n.data.stepName,
+    schedule: n.data.startDate,
+    status: n.data.status ?? "upcoming",
   }));
 }
 

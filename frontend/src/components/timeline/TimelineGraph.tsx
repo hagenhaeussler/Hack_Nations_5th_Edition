@@ -21,7 +21,12 @@ import { useCallback, useEffect, useMemo } from "react";
 
 import "@xyflow/react/dist/style.css";
 
-import { WorkflowNode, type WorkflowNodeData } from "./WorkflowNode";
+import {
+  TIMELINE_DAY_WIDTH,
+  TIMELINE_TRACK_HEIGHT,
+  WorkflowNode,
+  type WorkflowNodeData,
+} from "./WorkflowNode";
 
 const nodeTypes: NodeTypes = {
   workflow: WorkflowNode,
@@ -74,6 +79,7 @@ interface TimelineGraphProps {
   initialEdges: Edge[];
   selectedNodeId?: string | null;
   onNodeSelect?: (nodeId: string | null) => void;
+  onNodeMove?: (nodeId: string, position: { x: number; y: number }) => void;
 }
 
 export function TimelineGraph({
@@ -81,6 +87,7 @@ export function TimelineGraph({
   initialEdges,
   selectedNodeId = null,
   onNodeSelect,
+  onNodeMove,
 }: TimelineGraphProps) {
   return (
     <div className="h-full min-h-[560px] w-full">
@@ -90,6 +97,7 @@ export function TimelineGraph({
           initialEdges={initialEdges}
           selectedNodeId={selectedNodeId}
           onNodeSelect={onNodeSelect}
+          onNodeMove={onNodeMove}
         />
       </ReactFlowProvider>
     </div>
@@ -101,6 +109,7 @@ interface TimelineGraphInnerProps {
   initialEdges: Edge[];
   selectedNodeId: string | null;
   onNodeSelect?: (nodeId: string | null) => void;
+  onNodeMove?: (nodeId: string, position: { x: number; y: number }) => void;
 }
 
 function TimelineGraphInner({
@@ -108,6 +117,7 @@ function TimelineGraphInner({
   initialEdges,
   selectedNodeId,
   onNodeSelect,
+  onNodeMove,
 }: TimelineGraphInnerProps) {
   const { setViewport } = useReactFlow();
   const [nodes, setNodes, onNodesChange] =
@@ -171,6 +181,13 @@ function TimelineGraphInner({
     onNodeSelect?.(null);
   }, [onNodeSelect]);
 
+  const handleNodeDragStop = useCallback(
+    (_: React.MouseEvent, node: Node<WorkflowNodeData>) => {
+      onNodeMove?.(node.id, node.position);
+    },
+    [onNodeMove],
+  );
+
   return (
     <ReactFlow
       nodes={styledNodes}
@@ -179,6 +196,7 @@ function TimelineGraphInner({
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
       onNodeClick={handleNodeClick}
+      onNodeDragStop={handleNodeDragStop}
       onPaneClick={handlePaneClick}
       onInit={handleInit}
       nodeTypes={nodeTypes}
@@ -192,12 +210,14 @@ function TimelineGraphInner({
       zoomOnScroll
       selectionOnDrag={false}
       nodesConnectable={false}
+      snapToGrid
+      snapGrid={[TIMELINE_DAY_WIDTH, TIMELINE_TRACK_HEIGHT]}
       className="h-full w-full bg-bg-primary"
     >
       <Background
-        variant={BackgroundVariant.Dots}
-        gap={24}
-        size={1.4}
+        variant={BackgroundVariant.Lines}
+        gap={[TIMELINE_DAY_WIDTH, TIMELINE_TRACK_HEIGHT]}
+        size={1}
         color="var(--border-default)"
       />
       <Controls

@@ -18,15 +18,22 @@ export interface WorkflowNode {
   id: string;
   position: { x: number; y: number };
   data: {
-    title: string;
-    schedule?: string;
-    detail?: string;
-    status: "done" | "active" | "upcoming";
-    icon: string;
-    description?: string;
-    effort?: string;
-    deliverables?: string[];
-    checklist?: string[];
+    id: string;
+    stepName: string;
+    people: string[];
+    equipment: string[];
+    materials: string[];
+    timeEstimate: string;
+    price: string;
+    experts: string[];
+    citationsToPaper: string[];
+    procedure: string;
+    validationCriteria: string[];
+    startDate: string;
+    parentIds: string[];
+    childrenIds: string[];
+    status?: "done" | "active" | "upcoming";
+    icon?: string;
   };
 }
 
