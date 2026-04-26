@@ -8,7 +8,22 @@
  */
 
 import type { Attachment } from "@/components/PromptInput";
-import type { Project, WorkflowNode } from "@/lib/projects";
+import type {
+  FinalPlanConfidence,
+  FinalExperimentPlan,
+  LessonCard,
+  PlanEditRequest,
+  Project,
+  ProjectStatsReport,
+  RiskAnalysisResult,
+  WorkflowNode,
+} from "@/lib/projects";
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
+
+function apiPath(path: string): string {
+  return `${API_BASE_URL}${path}`;
+}
 
 // ---------------------------------------------------------------------------
 // Chat (legacy stub — left in place for backwards compatibility)
@@ -49,7 +64,7 @@ export async function sendPrompt({
     for (const file of files) form.append("files", file, file.name);
   }
 
-  const res = await fetch("/api/chat", { method: "POST", body: form });
+  const res = await fetch(apiPath("/api/chat"), { method: "POST", body: form });
   if (!res.ok) {
     throw new Error(`Backend error: ${res.status} ${res.statusText}`);
   }
@@ -62,7 +77,14 @@ export async function sendPrompt({
 
 /** Shape of every successful response: `{ ok: true, ...payload }`. */
 type ApiOk<T> = T & { ok: true };
-type ApiErr = { ok: false; error: string };
+type ApiErr = {
+  ok: false;
+  error: string;
+  request_id?: string;
+  stage?: string;
+  project_id?: string;
+  details?: unknown;
+};
 type ApiResponse<T> = ApiOk<T> | ApiErr;
 
 interface JsonRequestInit extends Omit<RequestInit, "body"> {
@@ -89,20 +111,31 @@ async function jsonRequest<T>(path: string, init?: JsonRequestInit): Promise<T> 
     body = JSON.stringify(init.body);
   }
 
-  const res = await fetch(path, { ...init, headers, body });
+  const res = await fetch(apiPath(path), { ...init, headers, body });
   const payload = (await res
     .json()
     .catch(() => null)) as ApiResponse<T> | null;
 
   if (!res.ok || !payload) {
     const message =
-      payload && payload.ok === false ? payload.error : res.statusText;
+      payload && payload.ok === false ? formatApiError(payload, res.statusText) : res.statusText;
     throw new Error(message || `Backend error: ${res.status}`);
   }
   if (payload.ok === false) {
-    throw new Error(payload.error || `Backend error: ${res.status}`);
+    throw new Error(formatApiError(payload, `Backend error: ${res.status}`));
   }
   return payload;
+}
+
+function formatApiError(payload: ApiErr, fallback: string): string {
+  const pieces = [payload.error || fallback];
+  if (payload.stage) pieces.push(`stage: ${payload.stage}`);
+  if (payload.request_id) pieces.push(`request: ${payload.request_id}`);
+  if (payload.details && typeof payload.details === "object" && "message" in payload.details) {
+    const detailMessage = String((payload.details as { message?: unknown }).message ?? "");
+    if (detailMessage && !pieces[0]?.includes(detailMessage)) pieces.push(`detail: ${detailMessage}`);
+  }
+  return pieces.join(" | ");
 }
 
 /**
@@ -130,7 +163,7 @@ export async function startResearch(
       }
     }
 
-    const res = await fetch("/api/projects/research", {
+    const res = await fetch(apiPath("/api/projects/research"), {
       method: "POST",
       body: form,
     });
@@ -140,11 +173,11 @@ export async function startResearch(
 
     if (!res.ok || !payload) {
       const message =
-        payload && payload.ok === false ? payload.error : res.statusText;
+        payload && payload.ok === false ? formatApiError(payload, res.statusText) : res.statusText;
       throw new Error(message || `Backend error: ${res.status}`);
     }
     if (payload.ok === false) {
-      throw new Error(payload.error || `Backend error: ${res.status}`);
+      throw new Error(formatApiError(payload, `Backend error: ${res.status}`));
     }
     return payload.project;
   }
@@ -193,4 +226,238 @@ export async function updateWorkflowNode(
     { method: "PATCH", body: { data, position } },
   );
   return res.project;
+}
+
+export interface ApplyPlanEditResponse {
+  project: Project;
+  generated_lesson_cards: LessonCard[];
+}
+
+export async function applyPlanEdit(
+  projectId: string,
+  edit: PlanEditRequest,
+): Promise<ApplyPlanEditResponse> {
+  return jsonRequest<ApplyPlanEditResponse>(
+    `/api/projects/${encodeURIComponent(projectId)}/edits`,
+    { method: "POST", body: edit },
+  );
+}
+
+export async function applyPlanEdits(
+  projectId: string,
+  edits: PlanEditRequest[],
+): Promise<ApplyPlanEditResponse> {
+  return jsonRequest<ApplyPlanEditResponse>(
+    `/api/projects/${encodeURIComponent(projectId)}/batch-edits`,
+    { method: "POST", body: { edits } },
+  );
+}
+
+export async function getFinalPlan(planId: string): Promise<FinalExperimentPlan> {
+  const res = await jsonRequest<{ plan: FinalExperimentPlan }>(
+    `/api/plans/${encodeURIComponent(planId)}`,
+  );
+  return res.plan;
+}
+
+export async function getPlanStats(planId: string): Promise<ProjectStatsReport> {
+  const res = await jsonRequest<{ stats: ProjectStatsReport }>(
+    `/api/plans/${encodeURIComponent(planId)}/stats`,
+  );
+  return res.stats;
+}
+
+export async function downloadPlanReportPdf(planId: string): Promise<void> {
+  const res = await fetch(
+    apiPath(`/api/plans/${encodeURIComponent(planId)}/report/pdf`),
+    { headers: { Accept: "application/pdf" } },
+  );
+  if (!res.ok) {
+    throw new Error(res.statusText || `Backend error: ${res.status}`);
+  }
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `labpilot_project_report_${planId}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+export async function analyzePlanRisks(planId: string): Promise<RiskAnalysisResult> {
+  const res = await jsonRequest<{ analysis: RiskAnalysisResult }>(
+    `/api/plans/${encodeURIComponent(planId)}/risk-analysis`,
+    {
+      method: "POST",
+      body: {
+        include_lessons: true,
+        include_previous_experiments: true,
+        include_citations: true,
+      },
+    },
+  );
+  return res.analysis;
+}
+
+// ---------------------------------------------------------------------------
+// Plan Question-Answer Agent
+// ---------------------------------------------------------------------------
+
+export interface PlanQAChatMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+}
+
+export interface PlanQAUsedContext {
+  plan_id: string;
+  task_ids?: string[];
+  node_ids: string[];
+  edge_ids: string[];
+  citation_ids: string[];
+  lesson_ids: string[];
+  source_types: string[];
+}
+
+export interface PlanQASuggestedAction {
+  type:
+    | "open_node"
+    | "highlight_node"
+    | "highlight_edge"
+    | "open_report_section"
+    | "open_citation"
+    | "suggest_plan_edit"
+    | "open_purchase_list"
+    | "open_risk_summary";
+  target_id?: string;
+  label: string;
+}
+
+export interface PlanQARequest {
+  question: string;
+  selected_node_id?: string | null;
+  selected_edge_id?: string | null;
+  chat_history?: PlanQAChatMessage[];
+  options?: {
+    include_sources?: boolean;
+    include_suggested_actions?: boolean;
+  };
+}
+
+export interface PlanQAResponse {
+  answer: string;
+  used_context: PlanQAUsedContext;
+  suggested_actions: PlanQASuggestedAction[];
+  confidence: FinalPlanConfidence;
+}
+
+export async function askPlanQuestion(
+  planId: string,
+  request: PlanQARequest,
+): Promise<PlanQAResponse> {
+  return jsonRequest<PlanQAResponse>(
+    `/api/plans/${encodeURIComponent(planId)}/qa`,
+    { method: "POST", body: request },
+  );
+}
+
+export type EditorResponseType =
+  | "answer"
+  | "proposed_patch"
+  | "applied_patch"
+  | "clarification_needed"
+  | "error";
+
+export interface PlanPatchOperation {
+  operation_id: string;
+  operation_type: string;
+  target_type: "node" | "edge" | "plan" | "schedule" | "report_section";
+  target_id: string;
+  field_path: string;
+  old_value: unknown;
+  new_value: unknown;
+  reason: string;
+  requires_recalculation: Array<"schedule" | "stats_report">;
+  risk_level: "low" | "medium" | "high" | "blocked";
+  validation_status: "pending" | "valid" | "invalid" | "blocked";
+}
+
+export interface PlanPatch {
+  patch_id: string;
+  plan_id: string;
+  created_at: string;
+  created_by: "editor_agent";
+  user_message: string;
+  summary: string;
+  operations: PlanPatchOperation[];
+  expected_effects: string[];
+  requires_confirmation: boolean;
+  safety_status: "pending_validation" | "valid" | "invalid" | "blocked";
+}
+
+export interface PatchValidationResult {
+  is_valid: boolean;
+  errors: string[];
+  warnings: string[];
+  requires_confirmation: boolean;
+  estimated_blast_radius: "tiny" | "small" | "medium" | "large" | "blocked";
+  affected_nodes: string[];
+  affected_edges: string[];
+  affected_report_sections: string[];
+  will_recalculate_schedule: boolean;
+  will_recalculate_stats: boolean;
+}
+
+export interface EditorIntent {
+  intent_id: string;
+  intent_type: "question" | "edit" | "mixed" | "ambiguous";
+  confidence: FinalPlanConfidence;
+  summary: string;
+  requires_confirmation: boolean;
+  edit_operations: PlanPatchOperation[];
+  clarifying_question: string | null;
+}
+
+export interface EditorAgentResponse {
+  response_type: EditorResponseType;
+  natural_language_response: string;
+  intent: EditorIntent;
+  proposed_patch: PlanPatch | null;
+  validation_result: PatchValidationResult | null;
+  updated_plan: unknown | null;
+  updated_stats_report: ProjectStatsReport | null;
+  generated_change_events: unknown[];
+  generated_lesson_cards: LessonCard[];
+  suggested_actions: PlanQASuggestedAction[];
+  project?: Project;
+  answer?: PlanQAResponse;
+}
+
+export interface PlanEditorRequest {
+  message: string;
+  selected_node_id?: string | null;
+  selected_edge_id?: string | null;
+  chat_history?: PlanQAChatMessage[];
+  mode?: "auto" | "question_only" | "edit_only";
+}
+
+export async function askPlanEditor(
+  planId: string,
+  request: PlanEditorRequest,
+): Promise<EditorAgentResponse> {
+  return jsonRequest<EditorAgentResponse>(
+    `/api/plans/${encodeURIComponent(planId)}/editor`,
+    { method: "POST", body: request },
+  );
+}
+
+export async function applyPlanEditorPatch(
+  planId: string,
+  patch: PlanPatch,
+): Promise<EditorAgentResponse> {
+  return jsonRequest<EditorAgentResponse>(
+    `/api/plans/${encodeURIComponent(planId)}/editor/apply-patch`,
+    { method: "POST", body: { confirmed: true, patch } },
+  );
 }

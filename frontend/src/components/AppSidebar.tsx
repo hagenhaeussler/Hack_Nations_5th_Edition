@@ -6,7 +6,7 @@ import {
   FlaskConical,
   FolderKanban,
   Home,
-  Network,
+  CalendarRange,
   PenSquare,
   UserRound,
   type LucideIcon,
@@ -59,7 +59,7 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
   const primaryNav: NavItem[] = projectId
     ? [
         { to: "/", label: "New Project", icon: Home, end: true },
-        { to: `/projects/${projectId}/graph`, label: "Graph", icon: Network },
+        { to: `/projects/${projectId}/calendar`, label: "Calendar", icon: CalendarRange },
         {
           to: `/projects/${projectId}/statistics`,
           label: "Statistics",

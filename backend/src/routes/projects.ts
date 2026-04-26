@@ -1,18 +1,23 @@
 import { Router, type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
 
 import { env } from "../env.js";
-import { getSimilarPapers } from "../lib/papers.js";
+import { runCreatorPlanAgents, runResearchAgents } from "../agents/agentOrchestrator.js";
+import { getSetupWarnings } from "../lib/config.js";
+import { FeedbackLearningError, FeedbackLearningService } from "../lib/feedbackLearningService.js";
+import { getLearningRepo } from "../lib/learningRepo.js";
 import {
   generatePrePlan,
   type PrePlanInputDocument,
 } from "../lib/prePlanMaker.js";
+import type { PlanEditRequest, WorkflowNode } from "../lib/projectTypes.js";
 import { getProjectsRepo } from "../lib/projectsRepo.js";
 import { upload } from "../lib/uploads.js";
-import type { Workflow, WorkflowNode } from "../lib/projectTypes.js";
-import { generateWorkflow } from "../lib/workflow.js";
 
 const router: Router = Router();
 const repo = getProjectsRepo();
+const feedbackLearning = new FeedbackLearningService(repo, getLearningRepo());
+const isDevelopment = process.env.NODE_ENV !== "production";
 
 /** Sleep helper — simulates the real research / generation latency. */
 const sleep = (ms: number) =>
@@ -84,87 +89,82 @@ function titleFromHypothesis(hypothesis: string): string {
   return `${(lastSpace > 32 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
 }
 
-function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is string => typeof item === "string")
-    .map((item) => item.trim())
-    .filter(Boolean);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function uniqueIds(ids: string[]): string[] {
-  return Array.from(new Set(ids));
+function sameJsonValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function patchWorkflowNode(
-  workflow: Workflow,
-  nodeId: string,
+function editsFromNodePatch(
+  current: WorkflowNode,
   patch: Partial<WorkflowNode["data"]>,
   position?: WorkflowNode["position"],
-): Workflow {
-  const nodeIds = new Set(workflow.nodes.map((node) => node.id));
-  if (!nodeIds.has(nodeId)) return workflow;
+): PlanEditRequest[] {
+  return (Object.entries(patch) as Array<[keyof WorkflowNode["data"], unknown]>)
+    .filter(([field, value]) => !sameJsonValue(current.data[field], value))
+    .map(([field, value]) => ({
+      change_source: "frontend_graph_edit",
+      target_type: "node",
+      target_id: current.id,
+      field_changed: String(field),
+      old_value: current.data[field],
+      new_value: value,
+      metadata: position ? { position } : {},
+    }));
+}
 
-  const current = workflow.nodes.find((node) => node.id === nodeId)!;
-  const parentIds = patch.parentIds
-    ? uniqueIds(
-        asStringArray(patch.parentIds).filter(
-          (id) => id !== nodeId && nodeIds.has(id),
-        ),
-      )
-    : asStringArray(current.data.parentIds);
-  const childrenIds = patch.childrenIds
-    ? uniqueIds(
-        asStringArray(patch.childrenIds).filter(
-          (id) => id !== nodeId && nodeIds.has(id),
-        ),
-      )
-    : asStringArray(current.data.childrenIds);
-
-  const nodes = workflow.nodes.map((node) => {
-    if (node.id === nodeId) {
-      return {
-        ...node,
-        position: position ?? node.position,
-        data: {
-          ...node.data,
-          ...patch,
-          parentIds,
-          childrenIds,
-        },
-      };
-    }
-
-    const nextParentIds = new Set(asStringArray(node.data.parentIds));
-    const nextChildrenIds = new Set(asStringArray(node.data.childrenIds));
-
-    if (parentIds.includes(node.id)) nextChildrenIds.add(nodeId);
-    else nextChildrenIds.delete(nodeId);
-
-    if (childrenIds.includes(node.id)) nextParentIds.add(nodeId);
-    else nextParentIds.delete(nodeId);
-
-    return {
-      ...node,
-      data: {
-        ...node.data,
-        parentIds: Array.from(nextParentIds),
-        childrenIds: Array.from(nextChildrenIds),
-      },
-    };
+function sendLearningError(res: Response, err: unknown): void {
+  if (err instanceof FeedbackLearningError) {
+    res.status(err.statusCode).json({ ok: false, error: err.message });
+    return;
+  }
+  console.error("[labpilot] feedback learning error", err);
+  res.status(500).json({
+    ok: false,
+    error: err instanceof Error ? err.message : "Unknown feedback learning error",
   });
+}
 
-  const edges = nodes.flatMap((node) =>
-    node.data.childrenIds
-      .filter((childId) => nodeIds.has(childId))
-      .map((childId) => ({
-        id: `e:${node.id}-${childId}`,
-        source: node.id,
-        target: childId,
-      })),
-  );
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
-  return { nodes, edges };
+function errorStack(err: unknown): string | undefined {
+  return err instanceof Error ? err.stack : undefined;
+}
+
+function sendRouteError(
+  res: Response,
+  err: unknown,
+  context: {
+    route: string;
+    stage: string;
+    requestId: string;
+    projectId?: string;
+  },
+): void {
+  const message = errorMessage(err);
+  console.error("[labpilot] route error", {
+    ...context,
+    message,
+    stack: errorStack(err),
+  });
+  res.status(500).json({
+    ok: false,
+    error: `Failed during ${context.stage}: ${message}`,
+    request_id: context.requestId,
+    stage: context.stage,
+    project_id: context.projectId,
+    details: isDevelopment
+      ? {
+          route: context.route,
+          message,
+          stack: errorStack(err),
+        }
+      : undefined,
+  });
 }
 
 /**
@@ -172,7 +172,7 @@ function patchWorkflowNode(
  */
 router.get("/", async (_req: Request, res: Response) => {
   const projects = await repo.list();
-  res.json({ ok: true, projects });
+  res.json({ ok: true, projects, warnings: getSetupWarnings() });
 });
 
 /**
@@ -189,7 +189,7 @@ router.get("/:id", async (req: Request, res: Response) => {
     res.status(404).json({ ok: false, error: "Project not found." });
     return;
   }
-  res.json({ ok: true, project });
+  res.json({ ok: true, project, warnings: project.setup_warnings ?? getSetupWarnings() });
 });
 
 /**
@@ -200,13 +200,14 @@ router.get("/:id", async (req: Request, res: Response) => {
  *   multipart: `hypothesis`, `files`, `fileCategories`, `links`, `linkCategories`
  *
  * Creates a project, simulates the literature-search latency, then attaches
- * the mock paper set and a Pre-Plan Maker DAG. The frontend should redirect
+ * the paper set and a pre-plan procedure template. The frontend should redirect
  * to a loading screen the moment it gets the project id back, and poll / await
  * this response before routing to the research view. We intentionally hold the
  * response open for `MOCK_LATENCY_MS` so the loading screen has something to
  * wait on.
  */
 router.post("/research", upload.array("files", 10), async (req: Request, res: Response) => {
+  const requestId = randomUUID();
   const hypothesis =
     typeof req.body?.hypothesis === "string" ? req.body.hypothesis.trim() : "";
 
@@ -215,67 +216,277 @@ router.post("/research", upload.array("files", 10), async (req: Request, res: Re
     return;
   }
 
-  const project = await repo.create({
-    hypothesis,
-    title: titleFromHypothesis(hypothesis),
-  });
+  let projectId: string | undefined;
+  let stage = "creating project";
+  try {
+    console.info("[labpilot] research request started", {
+      requestId,
+      hypothesisLength: hypothesis.length,
+      attachmentCount: Array.isArray(req.files) ? req.files.length : 0,
+    });
+    const project = await repo.create({
+      hypothesis,
+      title: titleFromHypothesis(hypothesis),
+    });
+    projectId = project.id;
 
-  await sleep(env.mockLatencyMs);
+    stage = "waiting for research latency";
+    await sleep(env.mockLatencyMs);
 
-  const papers = getSimilarPapers(hypothesis);
-  const prePlan = generatePrePlan({
-    hypothesis,
-    papers,
-    documents: sourceDocumentsFromRequest(req),
-  });
-  const updated = await repo.attachResearchResults(project.id, papers, prePlan);
-  if (!updated) {
-    res
-      .status(500)
-      .json({ ok: false, error: "Project disappeared mid-research." });
-    return;
+    stage = "running research agents";
+    const research = await runResearchAgents(hypothesis);
+    const papers = research.papers;
+
+    stage = "building pre-plan procedure template";
+    const prePlan = generatePrePlan({
+      hypothesis,
+      papers,
+      documents: sourceDocumentsFromRequest(req),
+    });
+    prePlan.agent_notes = [
+      ...prePlan.agent_notes,
+      `Research mode: ${research.mode}.`,
+      ...research.warnings,
+    ];
+
+    stage = "saving research results";
+    const updated = await repo.attachResearchResults(
+      project.id,
+      papers,
+      prePlan,
+      research.warnings,
+      research.mode,
+    );
+    if (!updated) {
+      res
+        .status(500)
+        .json({
+          ok: false,
+          error: "Project disappeared mid-research.",
+          request_id: requestId,
+          stage,
+          project_id: project.id,
+        });
+      return;
+    }
+
+    console.info("[labpilot] research request completed", {
+      requestId,
+      projectId: updated.id,
+      mode: research.mode,
+      paperCount: papers.length,
+      warningCount: research.warnings.length,
+    });
+    res.status(201).json({
+      ok: true,
+      project: updated,
+      project_id: updated.id,
+      extraction: research.extraction,
+      sources: research.sources,
+      novelty: research.novelty,
+      warnings: research.warnings,
+      mode: research.mode,
+      request_id: requestId,
+    });
+  } catch (err) {
+    sendRouteError(res, err, {
+      route: "POST /api/projects/research",
+      stage,
+      requestId,
+      projectId,
+    });
   }
-
-  res.status(201).json({ ok: true, project: updated });
 });
 
 /**
  * POST /api/projects/:id/generate
  *
- * Simulates the workflow-generation latency, then attaches the mock workflow.
- * Idempotent: regenerating a ready project replaces its workflow.
+ * Simulates the calendar-plan generation latency, then attaches the scheduled task plan.
+ * Idempotent: regenerating a ready project replaces its calendar plan.
  */
 router.post("/:id/generate", async (req: Request, res: Response) => {
+  const requestId = randomUUID();
   const id = paramId(req.params.id);
   if (!id) {
     res.status(400).json({ ok: false, error: "Missing project id." });
     return;
   }
 
-  const existing = await repo.get(id);
-  if (!existing) {
-    res.status(404).json({ ok: false, error: "Project not found." });
+  let stage = "loading project";
+  try {
+    const existing = await repo.get(id);
+    if (!existing) {
+      res.status(404).json({ ok: false, error: "Project not found.", request_id: requestId, stage });
+      return;
+    }
+
+    console.info("[labpilot] generation request started", { requestId, projectId: id });
+    stage = "marking project generating";
+    await repo.setStatus(id, "generating");
+
+    stage = "waiting for generation latency";
+    await sleep(env.mockLatencyMs);
+
+    stage = "loading relevant lessons";
+    const relevantLessons = await feedbackLearning.getRelevantLessons({
+      hypothesis: existing.hypothesis,
+      domain: existing.prePlan?.experiment_summary.domain,
+      experiment_type: existing.prePlan?.experiment_summary.experiment_type,
+      limit: 10,
+    });
+
+    stage = "running creator calendar agent";
+    const generated = await runCreatorPlanAgents({
+      project: existing,
+      prePlan: existing.prePlan ?? null,
+      lessons: relevantLessons,
+      labContext: req.body?.labContext,
+    });
+
+    stage = "saving generated calendar plan";
+    const updated = await repo.attachFinalPlan(
+      id,
+      generated.plan,
+      generated.workflow,
+      generated.warnings,
+      generated.generation_mode,
+    );
+    if (!updated) {
+      res
+        .status(500)
+        .json({
+          ok: false,
+          error: "Project disappeared mid-generation.",
+          request_id: requestId,
+          stage,
+          project_id: id,
+        });
+      return;
+    }
+
+    stage = "initializing plan version";
+    await feedbackLearning.initializeCreatorPlanVersion(updated);
+
+    console.info("[labpilot] generation request completed", {
+      requestId,
+      projectId: id,
+      planId: generated.plan.plan_id,
+      taskCount: generated.plan.tasks?.length ?? generated.plan.nodes.length,
+      mode: generated.generation_mode,
+      warningCount: generated.warnings.length,
+    });
+    res.status(200).json({
+      ok: true,
+      project: updated,
+      plan_id: generated.plan.plan_id,
+      plan: generated.plan,
+      tasks: generated.plan.tasks ?? [],
+      calendar_layout: generated.plan.calendar_layout,
+      stats: generated.stats,
+      warnings: generated.warnings,
+      generation_mode: generated.generation_mode,
+      request_id: requestId,
+    });
+  } catch (err) {
+    sendRouteError(res, err, {
+      route: "POST /api/projects/:id/generate",
+      stage,
+      requestId,
+      projectId: id,
+    });
+  }
+});
+
+/**
+ * POST /api/projects/:id/edits
+ *
+ * Applies one structured calendar task edit, stores an immutable PlanChangeEvent,
+ * updates the current workflow, and returns generated lesson cards.
+ */
+router.post("/:id/edits", async (req: Request, res: Response) => {
+  const id = paramId(req.params.id);
+  if (!id) {
+    res.status(400).json({ ok: false, error: "Missing project id." });
+    return;
+  }
+  if (!isRecord(req.body)) {
+    res.status(400).json({ ok: false, error: "Edit body is required." });
     return;
   }
 
-  await repo.setStatus(id, "generating");
+  try {
+    const result = await feedbackLearning.applyPlanEdit(
+      id,
+      req.body as unknown as PlanEditRequest,
+    );
+    res.status(200).json({
+      ok: true,
+      success: true,
+      project: result.project,
+      change_event: result.change_event,
+      updated_plan: result.updated_plan,
+      updated_stats_report: result.updated_stats_report,
+      generated_lesson_cards: result.generated_lesson_cards,
+    });
+  } catch (err) {
+    sendLearningError(res, err);
+  }
+});
 
-  await sleep(env.mockLatencyMs);
-
-  const workflow = generateWorkflow(
-    existing.hypothesis,
-    existing.prePlan,
-    existing.papers ?? [],
-  );
-  const updated = await repo.attachWorkflow(id, workflow);
-  if (!updated) {
-    res
-      .status(500)
-      .json({ ok: false, error: "Project disappeared mid-generation." });
+/**
+ * POST /api/projects/:id/batch-edits
+ *
+ * Applies multiple structured edits through the same immutable event pipeline.
+ */
+router.post("/:id/batch-edits", async (req: Request, res: Response) => {
+  const id = paramId(req.params.id);
+  if (!id) {
+    res.status(400).json({ ok: false, error: "Missing project id." });
+    return;
+  }
+  const edits = Array.isArray(req.body?.edits) ? req.body.edits : null;
+  if (!edits) {
+    res.status(400).json({ ok: false, error: "`edits` array is required." });
     return;
   }
 
-  res.status(200).json({ ok: true, project: updated });
+  try {
+    const result = await feedbackLearning.applyPlanEdits(
+      id,
+      edits as PlanEditRequest[],
+    );
+    res.status(200).json({
+      ok: true,
+      success: true,
+      project: result.project,
+      change_events: result.change_events,
+      updated_plan: result.updated_plan,
+      updated_stats_report: result.updated_stats_report,
+      generated_lesson_cards: result.generated_lesson_cards,
+    });
+  } catch (err) {
+    sendLearningError(res, err);
+  }
+});
+
+router.get("/:id/change-log", async (req: Request, res: Response) => {
+  const id = paramId(req.params.id);
+  if (!id) {
+    res.status(400).json({ ok: false, error: "Missing project id." });
+    return;
+  }
+  const change_events = await feedbackLearning.listPlanChangeEvents(id);
+  res.status(200).json({ ok: true, change_events });
+});
+
+router.get("/:id/versions", async (req: Request, res: Response) => {
+  const id = paramId(req.params.id);
+  if (!id) {
+    res.status(400).json({ ok: false, error: "Missing project id." });
+    return;
+  }
+  const versions = await feedbackLearning.listPlanVersions(id);
+  res.status(200).json({ ok: true, versions });
 });
 
 /**
@@ -324,14 +535,29 @@ router.patch("/:id/workflow/nodes/:nodeId", async (req: Request, res: Response) 
       ? (req.body.position as WorkflowNode["position"])
       : undefined;
 
-  const workflow = patchWorkflowNode(existing.workflow, nodeId, data, position);
-  const updated = await repo.attachWorkflow(id, workflow);
-  if (!updated) {
-    res.status(500).json({ ok: false, error: "Project disappeared mid-update." });
+  const currentNode = existing.workflow.nodes.find((node) => node.id === nodeId);
+  if (!currentNode) {
+    res.status(404).json({ ok: false, error: "Workflow node not found." });
     return;
   }
 
-  res.status(200).json({ ok: true, project: updated });
+  const edits = editsFromNodePatch(currentNode, data, position);
+  if (edits.length === 0) {
+    res.status(200).json({ ok: true, project: existing });
+    return;
+  }
+
+  try {
+    const result = await feedbackLearning.applyPlanEdits(id, edits);
+    res.status(200).json({
+      ok: true,
+      project: result.project,
+      change_events: result.change_events,
+      generated_lesson_cards: result.generated_lesson_cards,
+    });
+  } catch (err) {
+    sendLearningError(res, err);
+  }
 });
 
 export default router;

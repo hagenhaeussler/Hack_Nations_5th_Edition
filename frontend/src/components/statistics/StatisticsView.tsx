@@ -3,14 +3,18 @@ import {
   CalendarRange,
   CheckCircle2,
   ClipboardList,
+  Download,
+  Loader2,
+  ShieldAlert,
   Sparkles,
   Users,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { WorkflowStatus } from "@/components/timeline/WorkflowNode";
+import { downloadPlanReportPdf, getPlanStats } from "@/lib/api";
 import type { Paper } from "@/lib/papers";
-import type { Workflow } from "@/lib/projects";
+import type { FinalExperimentPlan, ProjectStatsReport, Workflow } from "@/lib/projects";
 import {
   formatUSD,
   getDomainExperts,
@@ -30,6 +34,9 @@ interface StatisticsViewProps {
   papers: Paper[];
   /** Workflow attached to the project; powers the time + tasks tiles. */
   workflow: Workflow;
+  /** Creator Agent output, when available, powers the structured report view. */
+  finalPlan?: FinalExperimentPlan;
+  onAnalyzeRisks?: () => void;
 }
 
 /**
@@ -50,13 +57,52 @@ interface StatisticsViewProps {
  * stack in the same priority order. Card styling follows design_guide.md
  * §8 — warm cream surface, soft border, terracotta used only for accents.
  */
-export function StatisticsView({ prompt: _prompt, papers, workflow }: StatisticsViewProps) {
+export function StatisticsView({
+  prompt: _prompt,
+  papers,
+  workflow,
+  finalPlan,
+  onAnalyzeRisks,
+}: StatisticsViewProps) {
+  const [currentReport, setCurrentReport] = useState<ProjectStatsReport | null>(
+    finalPlan?.stats_report ?? null,
+  );
+  const planId = finalPlan?.plan_id ?? null;
   const time = useMemo(() => getProjectTime(workflow), [workflow]);
   const budget = useMemo(() => getProjectBudget(), []);
   const team = useMemo(() => getTeam(), []);
   const tasks = useMemo(() => getProjectTasks(workflow), [workflow]);
   const validation = useMemo(() => getValidationCriteria(), []);
   const experts = useMemo(() => getDomainExperts(papers, 5), [papers]);
+
+  useEffect(() => {
+    if (!planId || !finalPlan) {
+      setCurrentReport(null);
+      return;
+    }
+    let cancelled = false;
+    setCurrentReport(finalPlan.stats_report);
+    getPlanStats(planId)
+      .then((stats) => {
+        if (!cancelled) setCurrentReport(stats);
+      })
+      .catch(() => {
+        if (!cancelled) setCurrentReport(finalPlan.stats_report);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [finalPlan, planId]);
+
+  if (finalPlan && currentReport) {
+    return (
+      <CreatorStatsView
+        report={currentReport}
+        planId={planId}
+        onAnalyzeRisks={onAnalyzeRisks}
+      />
+    );
+  }
 
   return (
     <section className="flex-1 overflow-y-auto px-8 py-6">
@@ -82,6 +128,237 @@ export function StatisticsView({ prompt: _prompt, papers, workflow }: Statistics
         </div>
       </div>
     </section>
+  );
+}
+
+function CreatorStatsView({
+  report,
+  planId,
+  onAnalyzeRisks,
+}: {
+  report: ProjectStatsReport;
+  planId: string | null;
+  onAnalyzeRisks?: () => void;
+}) {
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  async function handleExportPdf() {
+    if (!planId || exporting) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      await downloadPlanReportPdf(planId);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : "Could not export PDF.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  return (
+    <section className="flex-1 overflow-y-auto px-8 py-6">
+      <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-4">
+        <header className="rounded-lg border border-[color:var(--border-default)] bg-bg-surface p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
+                Creator Agent report
+              </p>
+              <h2 className="mt-1 font-sans text-[24px] font-medium tracking-[-0.01em] text-text-primary">
+                {report.experiment_goal}
+              </h2>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              {onAnalyzeRisks ? (
+                <button
+                  type="button"
+                  onClick={onAnalyzeRisks}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-sm border border-[color:var(--border-default)] bg-bg-surface px-3 py-1.5",
+                    "text-[13px] font-medium text-text-secondary shadow-sm transition-colors hover:bg-bg-hover hover:text-text-primary",
+                  )}
+                >
+                  <ShieldAlert size={14} strokeWidth={1.75} />
+                  Analyze Risks
+                </button>
+              ) : null}
+              <button
+                type="button"
+                disabled={!planId || exporting}
+                onClick={() => {
+                  void handleExportPdf();
+                }}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-sm bg-accent px-3 py-1.5 text-[13px] font-medium text-white",
+                  "shadow-sm transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-55",
+                )}
+              >
+                {exporting ? (
+                  <Loader2 size={14} strokeWidth={1.75} className="animate-spin" />
+                ) : (
+                  <Download size={14} strokeWidth={1.75} />
+                )}
+                {exporting ? "Exporting..." : "Export PDF"}
+              </button>
+            </div>
+          </div>
+          <p className="mt-2 max-w-[82ch] text-[13px] leading-[1.6] text-text-secondary">
+            {report.summary}
+          </p>
+          {exportError ? (
+            <p className="mt-2 text-[12px] text-red-700">{exportError}</p>
+          ) : null}
+        </header>
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-6">
+          <ReportMetricTile
+            icon={<CalendarRange size={15} strokeWidth={1.5} />}
+            eyebrow="Total time"
+            value={formatEstimate(report.total_estimated_duration)}
+            detail={report.total_estimated_duration.basis}
+            className="lg:col-span-2"
+          />
+          <ReportMetricTile
+            icon={<Banknote size={15} strokeWidth={1.5} />}
+            eyebrow="Budget"
+            value={
+              report.total_estimated_budget.value === null
+                ? "Unknown"
+                : formatUSD(report.total_estimated_budget.value)
+            }
+            detail={report.total_estimated_budget.basis}
+            className="lg:col-span-2"
+          />
+          <ReportListTile
+            icon={<Users size={15} strokeWidth={1.5} />}
+            eyebrow="People"
+            title={`${report.people_summary.length} roles`}
+            items={report.people_summary}
+            className="lg:col-span-2"
+          />
+          <ReportListTile
+            icon={<ClipboardList size={15} strokeWidth={1.5} />}
+            eyebrow="Tasks"
+            title={`${report.task_summary.length} scheduled tasks`}
+            items={report.task_summary.map(
+              (task) => `${task.step_name} · day ${task.start_day}`,
+            )}
+            className="lg:col-span-3"
+          />
+          <ReportListTile
+            icon={<CheckCircle2 size={15} strokeWidth={1.5} />}
+            eyebrow="Validation"
+            title={`${report.validation_criteria_summary.length} criteria`}
+            items={report.validation_criteria_summary}
+            className="lg:col-span-3"
+          />
+          <ReportListTile
+            icon={<BeakerIcon />}
+            eyebrow="Resources to buy or verify"
+            title={`${report.purchase_list.length} items`}
+            items={report.purchase_list.map(
+              (item) => `${item.name} · ${item.availability}`,
+            )}
+            className="lg:col-span-2"
+          />
+          <ReportListTile
+            icon={<ShieldIcon />}
+            eyebrow="Risks"
+            title={`${report.risk_summary.length} flagged`}
+            items={report.risk_summary.map(
+              (risk) => `${risk.severity}: ${risk.description}`,
+            )}
+            className="lg:col-span-2"
+          />
+          <ReportListTile
+            icon={<Sparkles size={15} strokeWidth={1.5} />}
+            eyebrow="Learnings and citations"
+            title="Influence summary"
+            items={[
+              ...report.learning_memory_summary,
+              ...report.citation_summary
+                .slice(0, 3)
+                .map((citation) => `${citation.document_id}: ${citation.location}`),
+            ]}
+            className="lg:col-span-2"
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function formatEstimate(estimate: ProjectStatsReport["total_estimated_duration"]): string {
+  return estimate.value === null ? `Unknown ${estimate.unit}` : `${estimate.value} ${estimate.unit}`;
+}
+
+function BeakerIcon() {
+  return <ClipboardList size={15} strokeWidth={1.5} />;
+}
+
+function ShieldIcon() {
+  return <CheckCircle2 size={15} strokeWidth={1.5} />;
+}
+
+function ReportMetricTile({
+  icon,
+  eyebrow,
+  value,
+  detail,
+  className,
+}: {
+  icon: React.ReactNode;
+  eyebrow: string;
+  value: string;
+  detail: string;
+  className?: string;
+}) {
+  return (
+    <Tile className={className}>
+      <TileHeading icon={icon} eyebrow={eyebrow} />
+      <p className="mt-auto font-sans text-[30px] font-light leading-none tracking-[-0.02em] text-text-primary">
+        {value}
+      </p>
+      <p className="mt-2 line-clamp-2 text-[12px] leading-[1.45] text-text-secondary">
+        {detail}
+      </p>
+    </Tile>
+  );
+}
+
+function ReportListTile({
+  icon,
+  eyebrow,
+  title,
+  items,
+  className,
+}: {
+  icon: React.ReactNode;
+  eyebrow: string;
+  title: string;
+  items: string[];
+  className?: string;
+}) {
+  const topItems = items.slice(0, 6);
+  return (
+    <Tile className={className}>
+      <TileHeading icon={icon} eyebrow={eyebrow} title={title} />
+      {topItems.length > 0 ? (
+        <ul className="mt-1 flex flex-col gap-1.5">
+          {topItems.map((item) => (
+            <li
+              key={item}
+              className="line-clamp-2 text-[12.5px] leading-[1.5] text-text-secondary"
+            >
+              {item}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-[12.5px] text-text-tertiary">None supplied.</p>
+      )}
+    </Tile>
   );
 }
 

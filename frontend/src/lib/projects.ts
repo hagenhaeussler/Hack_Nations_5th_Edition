@@ -48,6 +48,46 @@ export interface Workflow {
   edges: WorkflowEdge[];
 }
 
+export type PlanChangeSource =
+  | "frontend_calendar_edit"
+  | "frontend_graph_edit"
+  | "stats_report_edit"
+  | "chat_feedback"
+  | "system_suggestion_acceptance";
+
+export type PlanChangeTargetType =
+  | "task"
+  | "node"
+  | "edge"
+  | "plan"
+  | "schedule"
+  | "resource"
+  | "validation_criteria"
+  | "risk"
+  | "budget"
+  | "people"
+  | "equipment"
+  | "material";
+
+export interface PlanEditRequest {
+  change_source: PlanChangeSource;
+  target_type: PlanChangeTargetType;
+  target_id: string;
+  field_changed: string;
+  new_value: unknown;
+  old_value?: unknown;
+  change_type?: string;
+  raw_user_comment?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface LessonCard {
+  lesson_id: string;
+  lesson_title: string;
+  lesson_summary: string;
+  status: "active" | "candidate" | "needs_review" | "rejected" | "archived";
+}
+
 export type PrePlanConfidence = "high" | "medium" | "low";
 
 export interface PrePlanSourceDocument {
@@ -169,6 +209,309 @@ export interface PrePlan {
   summary: string;
 }
 
+export type FinalPlanConfidence = "high" | "medium" | "low";
+export type ResourceAvailability = "available" | "missing" | "unknown";
+export type FinalPlanNodeStatus = "done" | "active" | "upcoming";
+
+export interface FinalPlanEstimate {
+  value: number | null;
+  unit: string;
+  confidence: FinalPlanConfidence;
+  basis: string;
+}
+
+export interface FinalPlanPrice {
+  value: number | null;
+  currency: "USD";
+  confidence: FinalPlanConfidence;
+  basis: string;
+}
+
+export interface FinalPlanResource {
+  name: string;
+  quantity?: string;
+  unit?: string;
+  availability: ResourceAvailability;
+  reason?: string;
+  estimated_price?: number | null;
+}
+
+export interface FinalPlanCitation {
+  document_id: string;
+  location: string;
+  quote_or_evidence: string;
+  source_preplan_id?: string;
+}
+
+export interface FinalPlanRisk {
+  risk_id: string;
+  description: string;
+  severity: "low" | "medium" | "high";
+  mitigation: string;
+  source: string;
+}
+
+export interface FinalPlanCalendarPosition {
+  week_index: number;
+  day_index: number;
+  x: number;
+  y: number;
+  width: number;
+  lane: number;
+}
+
+export interface FinalPlanNode {
+  node_id: string;
+  step_name: string;
+  step_purpose: string;
+  detailed_procedure: string;
+  people_required: {
+    count: number | null;
+    roles: string[];
+  };
+  assigned_people_if_known: string[];
+  equipment_required: FinalPlanResource[];
+  equipment_available: string[];
+  equipment_missing: string[];
+  materials_required: FinalPlanResource[];
+  materials_available: string[];
+  materials_to_buy: FinalPlanResource[];
+  estimated_duration: FinalPlanEstimate;
+  estimated_price: FinalPlanPrice;
+  domain_experts: Array<{
+    name: string;
+    affiliation: string;
+    reason_relevant: string;
+    source: string;
+  }>;
+  source_citations: FinalPlanCitation[];
+  source_preplan_node_ids: string[];
+  related_lesson_ids: string[];
+  validation_criteria: string[];
+  milestone: string | null;
+  risks: FinalPlanRisk[];
+  uncertainty_notes: string[];
+  start: {
+    type: "relative" | "absolute";
+    relative_day: number;
+    date: string | null;
+  };
+  end: {
+    type: "relative" | "absolute";
+    relative_day: number;
+    date: string | null;
+  };
+  calendar_position: FinalPlanCalendarPosition;
+  parent_ids: string[];
+  child_ids: string[];
+  status: FinalPlanNodeStatus;
+}
+
+export interface ScheduledTask {
+  task_id: string;
+  task_key: string;
+  title: string;
+  description: string;
+  step_type: string;
+  procedure: string;
+  scheduled_date: string | null;
+  day_offset: number;
+  week_index: number;
+  day_index: number;
+  duration_hours: number | null;
+  duration_days?: number | null;
+  estimated_cost: number | null;
+  people_required: string[];
+  equipment_required: FinalPlanResource[];
+  materials_required: FinalPlanResource[];
+  missing_resources: string[];
+  items_to_buy: FinalPlanResource[];
+  validation_criteria: string[];
+  milestone: string | null;
+  risks: FinalPlanRisk[];
+  status: FinalPlanNodeStatus;
+  citations: FinalPlanCitation[];
+  domain_experts: FinalPlanNode["domain_experts"];
+  source_references: string[];
+  related_lesson_ids: string[];
+  uncertainty_notes: string[];
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FinalPlanEdge {
+  edge_id: string;
+  from_node_id: string;
+  to_node_id: string;
+  dependency_type: "must_finish_before_start" | "can_overlap_after_start";
+  reason: string;
+  is_critical_path_dependency: boolean;
+  confidence: FinalPlanConfidence;
+}
+
+export interface DayGroup {
+  date: string | null;
+  day_index: number;
+  label?: string;
+  weekday?: string;
+  task_ids?: string[];
+  node_ids: string[];
+}
+
+export interface WeekGroup {
+  week_index: number;
+  start_date: string | null;
+  end_date: string | null;
+  days: DayGroup[];
+}
+
+export interface CalendarLayout {
+  plan_start_date?: string | null;
+  plan_end_date?: string | null;
+  timeline_start_date: string | null;
+  timeline_end_date: string | null;
+  total_days: number;
+  total_weeks: number;
+  weeks?: WeekGroup[];
+  week_groups: WeekGroup[];
+  day_groups: DayGroup[];
+  task_positions?: Record<string, FinalPlanCalendarPosition>;
+  node_positions: Record<string, FinalPlanCalendarPosition>;
+  critical_path_node_ids: string[];
+}
+
+export interface ProjectStatsReport {
+  report_id: string;
+  plan_id: string;
+  hypothesis: string;
+  experiment_goal: string;
+  summary: string;
+  total_estimated_duration: FinalPlanEstimate;
+  total_estimated_budget: FinalPlanPrice;
+  people_summary: string[];
+  equipment_summary: {
+    required: string[];
+    available: string[];
+    missing: string[];
+    unknown: string[];
+  };
+  materials_summary: {
+    required: string[];
+    available: string[];
+    missing: string[];
+    unknown: string[];
+  };
+  purchase_list: FinalPlanResource[];
+  task_summary: Array<{
+    node_id: string;
+    step_name: string;
+    start_day: number;
+    end_day: number;
+    status: FinalPlanNodeStatus;
+  }>;
+  validation_criteria_summary: string[];
+  milestone_summary: Array<{
+    node_id: string;
+    milestone: string;
+  }>;
+  risk_summary: FinalPlanRisk[];
+  domain_expert_summary: FinalPlanNode["domain_experts"];
+  citation_summary: FinalPlanCitation[];
+  learning_memory_summary: string[];
+  open_questions: string[];
+  confidence_summary: string;
+}
+
+export interface FinalExperimentPlan {
+  plan_id: string;
+  user_input_id: string;
+  hypothesis: string;
+  experiment_title: string;
+  experiment_goal: string;
+  domain: string;
+  experiment_type: string;
+  created_at: string;
+  updated_at: string;
+  source_preplan_ids: string[];
+  source_document_ids: string[];
+  source_lesson_ids: string[];
+  source_previous_experiment_ids: string[];
+  plan_type?: "calendar";
+  plan_start_date?: string | null;
+  plan_end_date?: string | null;
+  tasks?: ScheduledTask[];
+  nodes: FinalPlanNode[];
+  edges: FinalPlanEdge[];
+  calendar_layout: CalendarLayout;
+  stats_report: ProjectStatsReport;
+  confidence: FinalPlanConfidence;
+  open_questions: string[];
+  agent_notes: string[];
+  creator_explanation: string;
+}
+
+export type RiskCategory =
+  | "timeline_risk"
+  | "budget_risk"
+  | "equipment_risk"
+  | "material_risk"
+  | "people_risk"
+  | "scheduling_risk"
+  | "validation_risk"
+  | "procedure_risk"
+  | "citation_support_risk"
+  | "uncertainty_risk"
+  | "lab_inventory_risk"
+  | "previous_experiment_risk"
+  | "learning_memory_risk";
+
+export type RiskSeverity = "critical" | "high" | "medium" | "low";
+export type RiskProbability = "high" | "medium" | "low" | "unknown";
+export type RiskImpact = "high" | "medium" | "low";
+
+export interface RiskSourceContext {
+  node_ids: string[];
+  lesson_ids: string[];
+  citation_ids: string[];
+  report_sections: string[];
+}
+
+export interface AnalyzedRisk {
+  risk_id: string;
+  title: string;
+  severity: RiskSeverity;
+  probability: RiskProbability;
+  impact: RiskImpact;
+  risk_score: number;
+  category: RiskCategory;
+  affected_nodes: string[];
+  affected_edges: string[];
+  affected_resources: string[];
+  explanation: string;
+  evidence: string[];
+  possible_consequences: string[];
+  suggested_mitigation: string[];
+  confidence: FinalPlanConfidence;
+  source_context: RiskSourceContext;
+}
+
+export interface RiskAnalysisResult {
+  analysis_id: string;
+  plan_id: string;
+  created_at: string;
+  overall_risk_level: RiskSeverity;
+  summary: string;
+  top_risks: AnalyzedRisk[];
+  risk_counts: Record<RiskSeverity, number>;
+  affected_nodes_ranked: Array<{
+    node_id: string;
+    risk_score: number;
+    risk_count: number;
+  }>;
+  recommended_next_actions: string[];
+}
+
 export interface Project {
   id: string;
   hypothesis: string;
@@ -178,7 +521,10 @@ export interface Project {
   updatedAt: string;
   papers?: Paper[];
   prePlan?: PrePlan;
+  finalPlan?: FinalExperimentPlan;
   workflow?: Workflow;
+  setup_warnings?: string[];
+  generation_mode?: "openai" | "fallback" | "partial";
 }
 
 export const STATUS_LABEL: Record<ProjectStatus, string> = {
