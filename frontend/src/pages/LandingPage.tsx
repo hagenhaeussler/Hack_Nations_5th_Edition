@@ -78,11 +78,11 @@ export function LandingPage() {
     <main className="relative flex min-h-screen flex-col">
       <section
         className={cn(
-          "mx-auto flex w-full max-w-[var(--chat-max-width)] flex-col items-center justify-center px-6 sm:px-8",
+          "mx-auto grid w-full max-w-[var(--chat-max-width)] flex-1 grid-rows-[minmax(0,1fr)_auto_minmax(0,1fr)] px-6 py-10 sm:px-8",
         )}
         aria-label="LabPilot landing"
       >
-        <div className="flex w-full flex-col items-center gap-8 pb-10 pt-28 animate-fade-in sm:pt-32">
+        <div className="flex w-full flex-col items-center justify-end gap-8 pb-8 animate-fade-in">
           <header className="flex flex-col items-center gap-3 text-center">
             <h1 className="font-sans text-[34px] font-medium leading-[1.15] tracking-[-0.01em] text-text-primary sm:text-[40px]">
               {greetingLine} What's your hypothesis?
@@ -108,10 +108,10 @@ export function LandingPage() {
               {error}
             </div>
           ) : null}
+        </div>
 
-          <div className="w-full">
-            <PromptInput onSubmit={handleSubmit} />
-          </div>
+        <div className="w-full animate-fade-in">
+          <PromptInput onSubmit={handleSubmit} />
         </div>
       </section>
     </main>

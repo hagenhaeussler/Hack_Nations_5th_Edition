@@ -1,308 +1,139 @@
-import type { PrePlan, PrePlanNode, Workflow } from "./projectTypes.js";
+import type { Paper, PrePlan, PrePlanNode, Workflow, WorkflowNode } from "./projectTypes.js";
 
-/**
- * Mock workflow returned by the generation endpoint.
- *
- * This is the same DAG the frontend used to ship as `EXAMPLE_NODES` /
- * `EXAMPLE_EDGES`. Living on the backend now means the project page reads
- * its workflow from the persisted record instead of always rendering the
- * built-in example. When the real generator lands, replace this with the
- * model output — the wire shape (`Workflow`) is intentionally narrow.
- */
-const COL = {
-  hypothesis: 0,
-  literature: 280,
-  design: 560,
-  prep: 840,
-  pilot: 1120,
-  refine: 1400,
-  main: 1680,
-  analysis: 1960,
-  manuscript: 2240,
+const DAY_WIDTH = 36;
+const TRACK_Y = {
+  framing: 0,
+  planning: 160,
+  prep: 320,
+  execution: 480,
+  analysis: 640,
 } as const;
 
-const ROW = { top: -150, middle: 0, bottom: 150 } as const;
+type Track = keyof typeof TRACK_Y;
 
-const TEMPLATE: Workflow = {
-  nodes: [
-    {
-      id: "hypothesis",
-      position: { x: COL.hypothesis, y: ROW.middle },
-      data: {
-        title: "Frame the hypothesis",
-        schedule: "Day 0",
-        detail:
-          "State the question, the model system, and the predicted effect.",
-        status: "done",
-        icon: "lightbulb",
-        effort: "Half a day",
-        description:
-          "Crisp hypotheses make every later step easier. State the factor, the outcome, the model system, and the direction you expect — then sanity-check it against existing intuition before committing time and reagents.",
-        deliverables: [
-          "Hypothesis statement (one sentence)",
-          "Predicted direction & effect size",
-        ],
-        checklist: [
-          "Identify the factor and the outcome",
-          "Specify the model system",
-          "State the predicted direction explicitly",
-          "Flag any ethical considerations early",
-        ],
-      },
-    },
-    {
-      id: "literature",
-      position: { x: COL.literature, y: ROW.middle },
-      data: {
-        title: "Literature review",
-        schedule: "Week 1",
-        detail: "Survey related work and identify the gap your study fills.",
-        status: "done",
-        icon: "book",
-        effort: "3–5 days",
-        description:
-          "Build a concise picture of what has been tried, what worked, and what is still open. Use the gap you identify here as the framing for your introduction later.",
-        deliverables: [
-          "Annotated bibliography (15–30 papers)",
-          "One-paragraph gap analysis",
-        ],
-        checklist: [
-          "Run keyword + author searches",
-          "Skim 30+ abstracts; deep-read the top 10",
-          "Extract methods, results, and limitations",
-          "Note what is still unanswered",
-        ],
-      },
-    },
-    {
-      id: "design",
-      position: { x: COL.design, y: ROW.middle },
-      data: {
-        title: "Experimental design",
-        schedule: "Week 2",
-        detail: "Pick assays, sample size, controls, and the readout.",
-        status: "active",
-        icon: "clipboard",
-        effort: "1 week",
-        description:
-          "Translate the hypothesis into a falsifiable design. Decide what you will measure, how many replicates you need to detect the effect, and which controls rule out the obvious confounds.",
-        deliverables: [
-          "Study design memo",
-          "Sample-size justification",
-          "Pre-registration draft",
-        ],
-        checklist: [
-          "Choose assays and primary readout",
-          "Power-analysis to set n",
-          "Specify positive / negative / vehicle controls",
-          "Decide blinding and randomisation",
-          "Pre-specify analysis plan",
-        ],
-      },
-    },
-    {
-      id: "reagents",
-      position: { x: COL.prep, y: ROW.top },
-      data: {
-        title: "Order reagents & consumables",
-        schedule: "Week 2–3",
-        detail:
-          "Antibodies, primers, media, plasticware. Confirm lead times.",
-        status: "upcoming",
-        icon: "package",
-        effort: "2–10 day lead times",
-        description:
-          "Get orders in early — biological reagents often have multi-week lead times and can become the critical path if left until the last minute.",
-        deliverables: [
-          "Itemised order list with vendors and catalog numbers",
-          "Lead-time tracker",
-        ],
-        checklist: [
-          "List every antibody, primer, plasmid, media component",
-          "Confirm catalog numbers + lot consistency",
-          "Place orders + record PO numbers",
-          "Schedule a check-in for arrivals & QC",
-        ],
-      },
-    },
-    {
-      id: "protocol",
-      position: { x: COL.prep, y: ROW.middle },
-      data: {
-        title: "Draft the protocol",
-        schedule: "Week 2–3",
-        detail: "Write step-by-step SOP; circulate for lab review.",
-        status: "upcoming",
-        icon: "pencil",
-        effort: "3–4 days drafting",
-        description:
-          "A precise SOP makes the experiment reproducible and turns silent assumptions into explicit choices. Circulate it for review before anyone touches a pipette.",
-        deliverables: [
-          "Step-by-step SOP (versioned)",
-          "Equipment + bench layout",
-        ],
-        checklist: [
-          "Write each step with timings + volumes",
-          "Add safety notes + waste handling",
-          "Circulate to PI + senior bench scientist",
-          "Iterate on review feedback",
-        ],
-      },
-    },
-    {
-      id: "controls",
-      position: { x: COL.prep, y: ROW.bottom },
-      data: {
-        title: "Plan controls & approvals",
-        schedule: "Week 2–3",
-        detail: "Positive / negative controls, IRB / IACUC if required.",
-        status: "upcoming",
-        icon: "shield",
-        effort: "1 day planning + approval lead time",
-        description:
-          "Controls are what turn an observation into evidence. Approval applications can take weeks — submit as soon as the design is firm.",
-        deliverables: [
-          "Control matrix",
-          "IRB / IACUC approval letter (if applicable)",
-        ],
-        checklist: [
-          "Plan positive controls (known effect)",
-          "Plan negative / vehicle controls",
-          "Identify potential confounds and how each is ruled out",
-          "Submit IRB / IACUC paperwork if applicable",
-        ],
-      },
-    },
-    {
-      id: "pilot",
-      position: { x: COL.pilot, y: ROW.middle },
-      data: {
-        title: "Pilot run",
-        schedule: "Week 4",
-        detail: "Small-scale dry run to surface protocol issues.",
-        status: "upcoming",
-        icon: "beaker",
-        effort: "2–3 days",
-        description:
-          "Run the protocol end-to-end at a fraction of the planned scale. The goal is not to test the hypothesis — it is to test the protocol.",
-        deliverables: ["Pilot data (1–2 replicates)", "Issue log"],
-        checklist: [
-          "Execute SOP at small scale",
-          "Time each step in practice",
-          "Verify the readout is in-range",
-          "Capture every issue you hit",
-        ],
-      },
-    },
-    {
-      id: "refine",
-      position: { x: COL.refine, y: ROW.middle },
-      data: {
-        title: "Refine the protocol",
-        schedule: "Week 5",
-        detail: "Adjust timings, concentrations, and handling steps.",
-        status: "upcoming",
-        icon: "clipboard-check",
-        effort: "2–3 days",
-        description:
-          "Address the issues surfaced by the pilot. Lock the SOP version you will use for the main run and resist the urge to keep tweaking after that point.",
-        deliverables: ["v2 SOP (frozen)", "Revised timing chart"],
-        checklist: [
-          "Address each issue from the pilot log",
-          "Adjust concentrations / incubation times",
-          "Re-circulate for a quick second review",
-          "Tag the SOP version",
-        ],
-      },
-    },
-    {
-      id: "main",
-      position: { x: COL.main, y: ROW.middle },
-      data: {
-        title: "Main experiment",
-        schedule: "Week 6–8",
-        detail: "Run replicates with the finalised protocol.",
-        status: "upcoming",
-        icon: "microscope",
-        effort: "3 weeks",
-        description:
-          "Execute the full design with the frozen SOP. Stay strict on conditions and metadata logging — this is the data your conclusions rest on.",
-        deliverables: ["Raw data files", "Lab notebook entries"],
-        checklist: [
-          "Run the planned replicates",
-          "Log conditions, timestamps, operator",
-          "Backup data daily to lab storage",
-          "Flag anomalies but do not discard data ad-hoc",
-        ],
-      },
-    },
-    {
-      id: "analysis",
-      position: { x: COL.analysis, y: ROW.middle },
-      data: {
-        title: "Data analysis",
-        schedule: "Week 9",
-        detail: "Statistics, figures, and effect-size estimates.",
-        status: "upcoming",
-        icon: "flask",
-        effort: "1 week",
-        description:
-          "Run the pre-specified analysis plan first; only then explore. Report effect sizes with uncertainty — not just p-values.",
-        deliverables: ["Statistics output", "Publication-quality figures"],
-        checklist: [
-          "Clean and merge data",
-          "Run pre-specified tests",
-          "Estimate effect sizes + confidence intervals",
-          "Produce figures from a reproducible script",
-        ],
-      },
-    },
-    {
-      id: "manuscript",
-      position: { x: COL.manuscript, y: ROW.middle },
-      data: {
-        title: "Manuscript draft",
-        schedule: "Week 10",
-        detail: "Methods, results, and figures ready for review.",
-        status: "upcoming",
-        icon: "filetext",
-        effort: "1–2 weeks",
-        description:
-          "Methods + results first while the experiment is fresh; introduction and discussion come last. Send for internal review before any external submission.",
-        deliverables: ["Methods + Results draft", "Final figure set"],
-        checklist: [
-          "Draft Methods (mirror the SOP)",
-          "Draft Results around the figures",
-          "Polish figures for clarity, not decoration",
-          "Send to co-authors for internal review",
-        ],
-      },
-    },
-  ],
-  edges: [
-    { id: "e:hypothesis-literature", source: "hypothesis", target: "literature" },
-    { id: "e:literature-design", source: "literature", target: "design" },
-    { id: "e:design-reagents", source: "design", target: "reagents" },
-    { id: "e:design-protocol", source: "design", target: "protocol" },
-    { id: "e:design-controls", source: "design", target: "controls" },
-    { id: "e:reagents-pilot", source: "reagents", target: "pilot" },
-    { id: "e:protocol-pilot", source: "protocol", target: "pilot" },
-    { id: "e:controls-pilot", source: "controls", target: "pilot" },
-    { id: "e:pilot-refine", source: "pilot", target: "refine" },
-    { id: "e:refine-main", source: "refine", target: "main" },
-    { id: "e:main-analysis", source: "main", target: "analysis" },
-    { id: "e:analysis-manuscript", source: "analysis", target: "manuscript" },
-  ],
+type WorkflowNodeData = WorkflowNode["data"];
+type WorkflowNodeDraft = Omit<WorkflowNode, "data"> & {
+  data: Omit<WorkflowNodeData, "childrenIds">;
 };
 
-function durationLabel(step: PrePlanNode): string | undefined {
-  const { value, unit, basis } = step.estimated_duration;
-  if (value !== null) return `${value} ${unit}`;
-  return basis ? `Unknown ${unit}` : undefined;
+function formatIsoDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
 }
 
-function detailForStep(step: PrePlanNode): string {
-  return step.step_purpose || "Procedure step reconstructed from source material.";
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function citationLabels(papers: Paper[]): string[] {
+  return papers.slice(0, 4).map((paper) =>
+    paper.url ? `${paper.title} (${paper.url})` : paper.title,
+  );
+}
+
+function expertLabels(papers: Paper[]): string[] {
+  const names = papers.flatMap((paper) => paper.authors).slice(0, 6);
+  return names.length > 0
+    ? Array.from(new Set(names))
+    : ["Principal investigator", "Senior bench scientist"];
+}
+
+function makeNode(input: {
+  id: string;
+  stepName: string;
+  offsetDays: number;
+  track: Track;
+  people: string[];
+  equipment: string[];
+  materials: string[];
+  timeEstimate: string;
+  price: string;
+  experts: string[];
+  citationsToPaper: string[];
+  procedure: string;
+  validationCriteria: string[];
+  startDate: string;
+  parentIds?: string[];
+  status?: WorkflowNodeData["status"];
+  icon?: string;
+}): WorkflowNodeDraft {
+  return {
+    id: input.id,
+    position: {
+      x: input.offsetDays * DAY_WIDTH,
+      y: TRACK_Y[input.track],
+    },
+    data: {
+      id: input.id,
+      stepName: input.stepName,
+      people: input.people,
+      equipment: input.equipment,
+      materials: input.materials,
+      timeEstimate: input.timeEstimate,
+      price: input.price,
+      experts: input.experts,
+      citationsToPaper: input.citationsToPaper,
+      procedure: input.procedure,
+      validationCriteria: input.validationCriteria,
+      startDate: input.startDate,
+      parentIds: input.parentIds ?? [],
+      status: input.status,
+      icon: input.icon,
+    },
+  };
+}
+
+function finishWorkflow(nodes: WorkflowNodeDraft[]): Workflow {
+  const childrenByParent = new Map<string, string[]>();
+  for (const node of nodes) {
+    for (const parentId of node.data.parentIds) {
+      const children = childrenByParent.get(parentId) ?? [];
+      children.push(node.id);
+      childrenByParent.set(parentId, children);
+    }
+  }
+
+  const finishedNodes: WorkflowNode[] = nodes.map((node) => ({
+    ...node,
+    data: {
+      ...node.data,
+      childrenIds: childrenByParent.get(node.id) ?? [],
+    },
+  }));
+
+  return {
+    nodes: finishedNodes,
+    edges: finishedNodes.flatMap((node) =>
+      node.data.childrenIds.map((childId) => ({
+        id: `e:${node.id}-${childId}`,
+        source: node.id,
+        target: childId,
+      })),
+    ),
+  };
+}
+
+
+function compactList(values: string[], fallback: string): string[] {
+  const cleaned = values.map((value) => value.trim()).filter(Boolean);
+  const unique = Array.from(new Set(cleaned));
+  return unique.length > 0 ? unique : [fallback];
+}
+
+function durationLabel(step: PrePlanNode): string {
+  const { value, unit } = step.estimated_duration;
+  return value !== null ? `${value} ${unit}` : `Unknown ${unit}`;
+}
+
+function priceLabel(step: PrePlanNode): string {
+  const { value, currency } = step.estimated_price;
+  if (value === null) return "Unknown";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 0,
+  }).format(value);
 }
 
 function iconForStep(step: PrePlanNode): string {
@@ -314,6 +145,15 @@ function iconForStep(step: PrePlanNode): string {
   if (/protocol|design|select|prepare/.test(text)) return "clipboard";
   if (/image|measure|microscope|assay/.test(text)) return "microscope";
   return "beaker";
+}
+
+function trackForStep(step: PrePlanNode): Track {
+  const text = `${step.step_name} ${step.step_purpose}`.toLowerCase();
+  if (/literature|source|review|design|protocol|select/.test(text)) return "planning";
+  if (/order|buy|reagent|material|prepare|sample|cell/.test(text)) return "prep";
+  if (/analy|sequence|data|statistic|result/.test(text)) return "analysis";
+  if (/hypothesis|goal|control|approval|validate/.test(text)) return "framing";
+  return "execution";
 }
 
 function topologicalPrePlanNodes(prePlan: PrePlan): PrePlanNode[] {
@@ -352,67 +192,358 @@ function topologicalPrePlanNodes(prePlan: PrePlan): PrePlanNode[] {
     : prePlan.dag.nodes;
 }
 
-function workflowFromPrePlan(prePlan: PrePlan): Workflow {
+function workflowFromPrePlan(
+  prePlan: PrePlan,
+  papers: Paper[],
+  startDate: Date,
+): Workflow {
   const orderedNodes = topologicalPrePlanNodes(prePlan);
-  const orderById = new Map(
-    orderedNodes.map((node, index) => [node.node_id, index]),
-  );
-  const rowById = new Map<string, number>();
+  const nodeIds = new Set(orderedNodes.map((node) => node.node_id));
+  const fallbackCitations = citationLabels(papers);
+  const fallbackExperts = expertLabels(papers);
+  const base = new Date(Date.UTC(
+    startDate.getUTCFullYear(),
+    startDate.getUTCMonth(),
+    startDate.getUTCDate(),
+  ));
 
-  for (const node of orderedNodes) {
-    const siblingIndex = node.parent_ids.length
-      ? node.parent_ids.reduce(
-          (acc, parentId) =>
-            acc + (prePlan.dag.nodes.find((n) => n.node_id === parentId)?.child_ids.indexOf(node.node_id) ?? 0),
-          0,
-        )
-      : 0;
-    rowById.set(node.node_id, siblingIndex % 3);
-  }
-
-  return {
-    nodes: orderedNodes.map((node, index) => {
-      const row = rowById.get(node.node_id) ?? 0;
-      const y = row === 0 ? 0 : row % 2 === 1 ? -150 : 150;
-      const evidence = node.source_citations[0];
-      const sourceLine = evidence
-        ? `Source: ${evidence.document_id}, ${evidence.location}.`
-        : "Source citation unavailable.";
+  return finishWorkflow(
+    orderedNodes.map((node, index): WorkflowNodeDraft => {
+      const parentIds = node.parent_ids.filter((id) => nodeIds.has(id));
+      const evidence = node.source_citations.map((citation) =>
+        citation.quote_or_evidence
+          ? `${citation.document_id}: ${citation.quote_or_evidence}`
+          : `${citation.document_id}, ${citation.location}`,
+      );
+      const experts = node.domain_experts.map((expert) =>
+        expert.affiliation && expert.affiliation !== "unknown"
+          ? `${expert.name}, ${expert.affiliation}`
+          : expert.name,
+      );
+      const lane = parentIds.length > 1 ? index % 3 : 1;
+      const track = trackForStep(node);
 
       return {
         id: node.node_id,
-        position: { x: index * 300, y },
+        position: {
+          x: index * 8 * DAY_WIDTH,
+          y: TRACK_Y[track] + (lane - 1) * 44,
+        },
         data: {
-          title: node.step_name,
-          schedule: node.start.value ?? undefined,
-          detail: detailForStep(node),
+          id: node.node_id,
+          stepName: node.step_name,
+          people: compactList(node.people_required.roles, "Research team"),
+          equipment: compactList(
+            node.equipment_required.map((item) => item.name),
+            "Equipment to be confirmed",
+          ),
+          materials: compactList(
+            node.materials_required.map((item) => item.name),
+            "Materials to be confirmed",
+          ),
+          timeEstimate: durationLabel(node),
+          price: priceLabel(node),
+          experts: compactList([...experts, ...fallbackExperts], "Domain expert"),
+          citationsToPaper: compactList(
+            [...evidence, ...fallbackCitations],
+            "Source citation unavailable",
+          ),
+          procedure: node.procedure || node.step_purpose,
+          validationCriteria: compactList(
+            node.validation_criteria,
+            "Validation criteria to be confirmed",
+          ),
+          startDate: node.start.date ?? formatIsoDate(addDays(base, index * 2)),
+          parentIds,
           status: index === 0 ? "active" : "upcoming",
           icon: iconForStep(node),
-          effort: durationLabel(node),
-          description: `${node.procedure}\n\n${sourceLine}`,
-          deliverables: node.validation_criteria,
-          checklist: [
-            ...node.validation_criteria,
-            ...node.uncertainties.map((item) => `Resolve uncertainty: ${item}`),
-          ],
         },
       };
     }),
-    edges: prePlan.dag.edges
-      .filter((edge) => orderById.has(edge.from) && orderById.has(edge.to))
-      .map((edge) => ({
-        id: `e:${edge.from}-${edge.to}`,
-        source: edge.from,
-        target: edge.to,
-      })),
-  };
+  );
 }
 
-/** Returns a workflow from the pre-plan DAG, falling back to the mock template. */
-export function generateWorkflow(_prompt: string, prePlan?: PrePlan): Workflow {
+/**
+ * Returns the seed workflow attached by the generation endpoint.
+ *
+ * The generator still uses deterministic seed steps, but the node payload now
+ * matches the MVP workflow model: resources, cost, experts, citations,
+ * procedure, validation, dates, and graph relationship IDs.
+ */
+export function generateWorkflow(
+  _prompt: string,
+  prePlanOrPapers?: PrePlan | Paper[],
+  papers: Paper[] = [],
+  startDate = new Date(),
+): Workflow {
+  const prePlan = Array.isArray(prePlanOrPapers) ? undefined : prePlanOrPapers;
+  const sourcePapers = Array.isArray(prePlanOrPapers) ? prePlanOrPapers : papers;
+
   if (prePlan && prePlan.dag.nodes.length > 0) {
-    return workflowFromPrePlan(prePlan);
+    return workflowFromPrePlan(prePlan, sourcePapers, startDate);
   }
-  // Deep-clone so callers can mutate without bleeding into the template.
-  return JSON.parse(JSON.stringify(TEMPLATE)) as Workflow;
+
+  const base = new Date(Date.UTC(
+    startDate.getUTCFullYear(),
+    startDate.getUTCMonth(),
+    startDate.getUTCDate(),
+  ));
+  const citations = citationLabels(sourcePapers);
+  const experts = expertLabels(sourcePapers);
+  const d = (offsetDays: number) => formatIsoDate(addDays(base, offsetDays));
+
+  return finishWorkflow([
+    makeNode({
+      id: "hypothesis",
+      stepName: "Frame the hypothesis",
+      offsetDays: 0,
+      track: "framing",
+      people: ["Principal investigator"],
+      equipment: ["Project notebook"],
+      materials: ["Original research question"],
+      timeEstimate: "1 day",
+      price: "$0",
+      experts: experts.slice(0, 2),
+      citationsToPaper: citations.slice(0, 2),
+      procedure:
+        "Write the factor, model system, expected outcome, and success metric in one falsifiable statement.",
+      validationCriteria: [
+        "Hypothesis identifies the independent variable",
+        "Outcome and expected direction are explicit",
+      ],
+      startDate: d(0),
+      status: "done",
+      icon: "lightbulb",
+    }),
+    makeNode({
+      id: "literature",
+      stepName: "Literature review",
+      offsetDays: 1,
+      track: "planning",
+      people: ["Graduate researcher", "Principal investigator"],
+      equipment: ["Reference manager", "Paper database access"],
+      materials: ["Search keywords", "Related work exports"],
+      timeEstimate: "5 days",
+      price: "$250",
+      experts: experts.slice(0, 4),
+      citationsToPaper: citations,
+      procedure:
+        "Screen related papers, extract protocols and limitations, and write a short gap analysis.",
+      validationCriteria: [
+        "At least 10 relevant papers reviewed",
+        "Protocol constraints and unresolved gaps are summarized",
+      ],
+      startDate: d(1),
+      parentIds: ["hypothesis"],
+      status: "done",
+      icon: "book",
+    }),
+    makeNode({
+      id: "design",
+      stepName: "Experimental design",
+      offsetDays: 6,
+      track: "planning",
+      people: ["Principal investigator", "Postdoctoral fellow", "Statistician"],
+      equipment: ["Power analysis worksheet"],
+      materials: ["Assay options", "Control matrix"],
+      timeEstimate: "5 days",
+      price: "$600",
+      experts: experts.slice(0, 3),
+      citationsToPaper: citations.slice(0, 3),
+      procedure:
+        "Choose assays, controls, sample size, randomization, and the primary analysis plan.",
+      validationCriteria: [
+        "Primary readout and controls are documented",
+        "Sample size rationale is recorded",
+      ],
+      startDate: d(6),
+      parentIds: ["literature"],
+      status: "active",
+      icon: "clipboard",
+    }),
+    makeNode({
+      id: "reagents",
+      stepName: "Order reagents and consumables",
+      offsetDays: 11,
+      track: "prep",
+      people: ["Lab manager", "Research assistant"],
+      equipment: ["Procurement system", "Cold storage"],
+      materials: ["Antibodies", "Primers", "Media", "Plasticware"],
+      timeEstimate: "7 days",
+      price: "$11,400",
+      experts: ["Lab manager", ...experts.slice(0, 1)],
+      citationsToPaper: citations.slice(0, 2),
+      procedure:
+        "Create an itemized order list, confirm catalog numbers, place orders, and track lead times.",
+      validationCriteria: [
+        "All critical reagents have vendor and lot information",
+        "Expected arrival dates are recorded",
+      ],
+      startDate: d(11),
+      parentIds: ["design"],
+      status: "upcoming",
+      icon: "package",
+    }),
+    makeNode({
+      id: "protocol",
+      stepName: "Draft the protocol",
+      offsetDays: 11,
+      track: "planning",
+      people: ["Postdoctoral fellow", "Lead experimentalist"],
+      equipment: ["SOP template", "Bench layout"],
+      materials: ["Experimental design memo", "Safety requirements"],
+      timeEstimate: "4 days",
+      price: "$1,200",
+      experts: experts.slice(0, 2),
+      citationsToPaper: citations.slice(0, 3),
+      procedure:
+        "Translate the design into a step-by-step SOP with timings, volumes, safety notes, and review owners.",
+      validationCriteria: [
+        "Each procedure step has timing and acceptance notes",
+        "PI or senior scientist review is complete",
+      ],
+      startDate: d(11),
+      parentIds: ["design"],
+      status: "upcoming",
+      icon: "pencil",
+    }),
+    makeNode({
+      id: "controls",
+      stepName: "Plan controls and approvals",
+      offsetDays: 11,
+      track: "framing",
+      people: ["Principal investigator", "Compliance reviewer"],
+      equipment: ["Approval portal"],
+      materials: ["Control samples", "Ethics forms"],
+      timeEstimate: "5 days",
+      price: "$980",
+      experts: ["Compliance reviewer", ...experts.slice(0, 1)],
+      citationsToPaper: citations.slice(0, 2),
+      procedure:
+        "Define positive, negative, and vehicle controls, then submit required IRB/IACUC or biosafety paperwork.",
+      validationCriteria: [
+        "Control matrix rules out major confounds",
+        "Required approvals are submitted or confirmed unnecessary",
+      ],
+      startDate: d(11),
+      parentIds: ["design"],
+      status: "upcoming",
+      icon: "shield",
+    }),
+    makeNode({
+      id: "pilot",
+      stepName: "Pilot run",
+      offsetDays: 18,
+      track: "execution",
+      people: ["Lead experimentalist", "Research assistant"],
+      equipment: ["Bench setup", "Plate reader or microscope"],
+      materials: ["Pilot aliquots", "Prepared controls"],
+      timeEstimate: "3 days",
+      price: "$2,400",
+      experts: experts.slice(0, 2),
+      citationsToPaper: citations.slice(0, 2),
+      procedure:
+        "Run the SOP at reduced scale, time each step, capture failure modes, and confirm the readout is in range.",
+      validationCriteria: [
+        "Readout signal is measurable and within dynamic range",
+        "Protocol issues are captured in an issue log",
+      ],
+      startDate: d(18),
+      parentIds: ["reagents", "protocol", "controls"],
+      status: "upcoming",
+      icon: "beaker",
+    }),
+    makeNode({
+      id: "refine",
+      stepName: "Refine the protocol",
+      offsetDays: 21,
+      track: "planning",
+      people: ["Postdoctoral fellow", "Lead experimentalist"],
+      equipment: ["Versioned SOP"],
+      materials: ["Pilot issue log", "Pilot data"],
+      timeEstimate: "3 days",
+      price: "$900",
+      experts: experts.slice(0, 2),
+      citationsToPaper: citations.slice(0, 2),
+      procedure:
+        "Resolve pilot issues, adjust timings or concentrations, and freeze the SOP version for the main run.",
+      validationCriteria: [
+        "Every pilot issue has a disposition",
+        "Final SOP version is tagged and shared",
+      ],
+      startDate: d(21),
+      parentIds: ["pilot"],
+      status: "upcoming",
+      icon: "clipboard-check",
+    }),
+    makeNode({
+      id: "main",
+      stepName: "Main experiment",
+      offsetDays: 24,
+      track: "execution",
+      people: ["Lead experimentalist", "Research assistant"],
+      equipment: ["Final assay setup", "Data capture workstation"],
+      materials: ["Full reagent set", "Experimental samples", "Controls"],
+      timeEstimate: "15 days",
+      price: "$9,800",
+      experts: experts.slice(0, 3),
+      citationsToPaper: citations.slice(0, 3),
+      procedure:
+        "Execute the frozen SOP across planned replicates, log metadata, and back up raw data daily.",
+      validationCriteria: [
+        "Planned replicate count is complete",
+        "Metadata and raw files pass daily completeness checks",
+      ],
+      startDate: d(24),
+      parentIds: ["refine"],
+      status: "upcoming",
+      icon: "microscope",
+    }),
+    makeNode({
+      id: "analysis",
+      stepName: "Data analysis",
+      offsetDays: 39,
+      track: "analysis",
+      people: ["Bioinformatician", "Statistician"],
+      equipment: ["Analysis workstation", "Versioned notebook"],
+      materials: ["Raw data", "Analysis plan"],
+      timeEstimate: "5 days",
+      price: "$3,200",
+      experts: experts.slice(0, 3),
+      citationsToPaper: citations.slice(0, 3),
+      procedure:
+        "Clean the data, run the pre-specified tests, estimate effect sizes, and generate figures reproducibly.",
+      validationCriteria: [
+        "Analysis follows the pre-specified plan",
+        "Effect sizes and confidence intervals are reported",
+      ],
+      startDate: d(39),
+      parentIds: ["main"],
+      status: "upcoming",
+      icon: "flask",
+    }),
+    makeNode({
+      id: "manuscript",
+      stepName: "Manuscript draft",
+      offsetDays: 44,
+      track: "analysis",
+      people: ["Principal investigator", "First author"],
+      equipment: ["Manuscript workspace", "Figure export pipeline"],
+      materials: ["Final figures", "Methods SOP", "Analysis outputs"],
+      timeEstimate: "7 days",
+      price: "$1,500",
+      experts: experts.slice(0, 4),
+      citationsToPaper: citations,
+      procedure:
+        "Draft methods and results from the finalized SOP and figures, then circulate for internal review.",
+      validationCriteria: [
+        "Methods are reproducible from the SOP",
+        "All claims cite supporting results or literature",
+      ],
+      startDate: d(44),
+      parentIds: ["analysis"],
+      status: "upcoming",
+      icon: "filetext",
+    }),
+  ]);
 }

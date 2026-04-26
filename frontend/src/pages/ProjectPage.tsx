@@ -9,8 +9,12 @@ import { PaperList } from "@/components/PaperList";
 import { StatisticsView } from "@/components/statistics/StatisticsView";
 import { TimelineGraph } from "@/components/timeline/TimelineGraph";
 import { WorkflowNodeDetailPanel } from "@/components/timeline/WorkflowNodeDetailPanel";
-import type { WorkflowNodeData } from "@/components/timeline/WorkflowNode";
-import { generateProject, getProject } from "@/lib/api";
+import {
+  TIMELINE_DAY_WIDTH,
+  TIMELINE_TRACK_HEIGHT,
+  type WorkflowNodeData,
+} from "@/components/timeline/WorkflowNode";
+import { generateProject, getProject, updateWorkflowNode } from "@/lib/api";
 import type { Paper } from "@/lib/papers";
 import {
   STATUS_LABEL,
@@ -25,6 +29,43 @@ type ProjectPageSlug = "graph" | "statistics" | "literature";
 
 function isProjectPageSlug(value: string | undefined): value is ProjectPageSlug {
   return value === "graph" || value === "statistics" || value === "literature";
+}
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function parseWorkflowDate(value: string | undefined): Date | null {
+  if (!value) return null;
+  const time = Date.parse(`${value}T00:00:00.000Z`);
+  return Number.isNaN(time) ? null : new Date(time);
+}
+
+function formatWorkflowDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function addWorkflowDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function getWorkflowBaseDate(workflow: Workflow | undefined): Date {
+  const dates =
+    workflow?.nodes
+      .map((node) => parseWorkflowDate(node.data.startDate))
+      .filter((date): date is Date => Boolean(date)) ?? [];
+  if (dates.length === 0) return new Date();
+  return new Date(Math.min(...dates.map((date) => date.getTime())));
+}
+
+function getDayOffset(baseDate: Date, startDate: string | undefined): number {
+  const date = parseWorkflowDate(startDate);
+  if (!date) return 0;
+  return Math.max(0, Math.round((date.getTime() - baseDate.getTime()) / MS_PER_DAY));
+}
+
+function snapTrack(y: number): number {
+  return Math.round(y / TIMELINE_TRACK_HEIGHT) * TIMELINE_TRACK_HEIGHT;
 }
 
 /**
@@ -83,6 +124,10 @@ export function ProjectPage() {
       setGenerating(false);
     }
   }, [id]);
+
+  const handleProjectChange = useCallback((project: Project) => {
+    setState({ kind: "ready", project });
+  }, []);
 
   if (state.kind === "loading") {
     return (
@@ -145,6 +190,7 @@ export function ProjectPage() {
         onGenerate={() => {
           void handleGenerate();
         }}
+        onProjectChange={handleProjectChange}
       />
     );
   }
@@ -161,6 +207,7 @@ export function ProjectPage() {
       onGenerate={() => {
         void handleGenerate();
       }}
+      onProjectChange={handleProjectChange}
     />
   );
 }
@@ -174,6 +221,7 @@ interface WorkflowViewProps {
   workflow?: Workflow;
   page: ProjectPageSlug;
   onGenerate: () => void;
+  onProjectChange: (project: Project) => void;
 }
 
 function ProjectWorkspaceView({
@@ -181,18 +229,24 @@ function ProjectWorkspaceView({
   workflow,
   page,
   onGenerate,
+  onProjectChange,
 }: WorkflowViewProps) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const workflowBaseDate = useMemo(() => getWorkflowBaseDate(workflow), [workflow]);
 
   const flowNodes = useMemo<Node<WorkflowNodeData>[]>(
     () =>
-      (workflow?.nodes ?? []).map((n) => ({
+      (workflow?.nodes ?? []).map((n, index) => ({
         id: n.id,
         type: "workflow",
-        position: n.position,
+        position: {
+          x: getDayOffset(workflowBaseDate, n.data.startDate) * TIMELINE_DAY_WIDTH,
+          y: snapTrack(n.position.y),
+        },
         data: n.data as WorkflowNodeData,
+        draggable: index !== 0,
       })),
-    [workflow?.nodes],
+    [workflow?.nodes, workflowBaseDate],
   );
 
   const flowEdges = useMemo<Edge[]>(
@@ -216,6 +270,35 @@ function ProjectWorkspaceView({
     if (page !== "graph") setSelectedNodeId(null);
   }, [page]);
 
+  const handleNodeDataChange = useCallback(
+    async (nodeId: string, data: WorkflowNodeData) => {
+      const next = await updateWorkflowNode(project.id, nodeId, data);
+      onProjectChange(next);
+    },
+    [onProjectChange, project.id],
+  );
+
+  const handleNodeMove = useCallback(
+    (nodeId: string, position: { x: number; y: number }) => {
+      const firstNodeId = workflow?.nodes[0]?.id;
+      if (!workflow || nodeId === firstNodeId) return;
+
+      const snappedX = Math.max(0, Math.round(position.x / TIMELINE_DAY_WIDTH) * TIMELINE_DAY_WIDTH);
+      const snappedY = snapTrack(position.y);
+      const startDate = formatWorkflowDate(
+        addWorkflowDays(workflowBaseDate, Math.round(snappedX / TIMELINE_DAY_WIDTH)),
+      );
+
+      void updateWorkflowNode(
+        project.id,
+        nodeId,
+        { startDate },
+        { x: snappedX, y: snappedY },
+      ).then(onProjectChange);
+    },
+    [onProjectChange, project.id, workflow, workflowBaseDate],
+  );
+
   return (
     <main className="relative flex h-screen min-h-0 flex-col overflow-hidden">
       <ProjectHeader
@@ -233,6 +316,7 @@ function ProjectWorkspaceView({
               initialEdges={flowEdges}
               selectedNodeId={selectedNodeId}
               onNodeSelect={setSelectedNodeId}
+              onNodeMove={handleNodeMove}
             />
           ) : (
             <div className="flex h-full items-center justify-center px-8 text-center">
@@ -262,6 +346,7 @@ function ProjectWorkspaceView({
         <WorkflowNodeDetailPanel
           key={selectedNode.id}
           data={selectedNode.data}
+          onChange={(data) => handleNodeDataChange(selectedNode.id, data)}
           onClose={() => setSelectedNodeId(null)}
         />
       ) : null}

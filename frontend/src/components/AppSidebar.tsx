@@ -2,6 +2,7 @@ import {
   BarChart3,
   BookOpen,
   ChevronLeft,
+  ChevronRight,
   FlaskConical,
   FolderKanban,
   Home,
@@ -10,7 +11,6 @@ import {
   UserRound,
   type LucideIcon,
 } from "lucide-react";
-import { useState } from "react";
 import { NavLink, useMatch } from "react-router-dom";
 
 import { LogoMark } from "@/components/LogoMark";
@@ -52,10 +52,9 @@ const SETTINGS_NAV: NavItem[] = [
  * `AppShell` keeps in sync.
  */
 export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
-  const [hoverPreview, setHoverPreview] = useState(false);
   const projectMatch = useMatch("/projects/:id/*");
   const projectId = projectMatch?.params.id;
-  const expanded = !collapsed || hoverPreview;
+  const expanded = !collapsed;
 
   const primaryNav: NavItem[] = projectId
     ? [
@@ -79,7 +78,6 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
       role="navigation"
       aria-label="Main navigation"
       data-collapsed={!expanded || undefined}
-      onMouseLeave={() => setHoverPreview(false)}
       className={cn(
         "fixed inset-y-0 left-0 z-30 flex flex-col border-r border-[color:var(--border-default)]",
         "bg-bg-sidebar transition-[width] duration-[var(--duration-normal)] ease-[var(--ease-default)]",
@@ -90,28 +88,31 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
     >
       {/* Brand row + collapse toggle */}
       <div className="flex items-center gap-2 px-3 pb-3 pt-5">
-        <NavLink
-          to="/"
-          aria-label="Return to LabPilot home"
-          onMouseEnter={() => {
-            if (collapsed) setHoverPreview(true);
-          }}
-          className={cn(
-            "flex min-w-0 flex-1 items-center gap-2.5 rounded-sm px-2 py-1 text-text-primary",
-            "transition-colors duration-[var(--duration-fast)] hover:bg-[color:var(--bg-hover)]",
-          )}
-        >
-          <LogoMark size={22} />
-          {expanded && (
-            <span className="select-none truncate font-sans text-[16px] font-light tracking-[0.06em]">
-              LabPilot
-            </span>
-          )}
-        </NavLink>
+        {!expanded ? (
+          <CollapsedBrandButton onOpen={onToggle} />
+        ) : (
+          <>
+            <NavLink
+              to="/"
+              aria-label="Return to LabPilot home"
+              className={cn(
+                "flex min-w-0 flex-1 items-center gap-2.5 rounded-sm px-2 py-1 text-text-primary",
+                "transition-colors duration-[var(--duration-fast)] hover:bg-[color:var(--bg-hover)]",
+              )}
+            >
+              <LogoMark size={22} />
+              <span className="select-none truncate font-sans text-[16px] font-light tracking-[0.06em]">
+                LabPilot
+              </span>
+            </NavLink>
 
-        {expanded && !collapsed && (
-          <CollapseButton onToggle={onToggle} />
-        )}
+            {collapsed ? (
+              <ExpandButton onToggle={onToggle} />
+            ) : (
+              <CollapseButton onToggle={onToggle} />
+            )}
+          </>
+          )}
       </div>
 
       {/* Primary nav */}
@@ -133,6 +134,34 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
         ))}
       </nav>
     </aside>
+  );
+}
+
+interface CollapsedBrandButtonProps {
+  onOpen: () => void;
+}
+
+function CollapsedBrandButton({ onOpen }: CollapsedBrandButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label="Expand sidebar"
+      title="Expand sidebar"
+      className={cn(
+        "group relative flex h-8 w-full items-center justify-center rounded-sm text-text-primary",
+        "transition-colors duration-[var(--duration-fast)] hover:bg-[color:var(--bg-hover)]",
+      )}
+    >
+      <span className="transition-opacity duration-[var(--duration-fast)] group-hover:opacity-0">
+        <LogoMark size={22} />
+      </span>
+      <ChevronRight
+        size={15}
+        strokeWidth={1.5}
+        className="absolute text-text-tertiary opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover:opacity-100"
+      />
+    </button>
   );
 }
 
@@ -196,6 +225,23 @@ function CollapseButton({ onToggle }: CollapseButtonProps) {
       )}
     >
       <ChevronLeft size={15} strokeWidth={1.5} />
+    </button>
+  );
+}
+
+function ExpandButton({ onToggle }: CollapseButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label="Expand sidebar"
+      title="Expand sidebar"
+      className={cn(
+        "flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-text-tertiary",
+        "transition-colors duration-[var(--duration-fast)] hover:bg-[color:var(--bg-hover)] hover:text-text-primary",
+      )}
+    >
+      <ChevronRight size={15} strokeWidth={1.5} />
     </button>
   );
 }

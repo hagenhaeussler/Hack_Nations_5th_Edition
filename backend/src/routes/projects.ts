@@ -8,6 +8,7 @@ import {
 } from "../lib/prePlanMaker.js";
 import { getProjectsRepo } from "../lib/projectsRepo.js";
 import { upload } from "../lib/uploads.js";
+import type { Workflow, WorkflowNode } from "../lib/projectTypes.js";
 import { generateWorkflow } from "../lib/workflow.js";
 
 const router: Router = Router();
@@ -81,6 +82,89 @@ function titleFromHypothesis(hypothesis: string): string {
   const cut = cleaned.slice(0, 64);
   const lastSpace = cut.lastIndexOf(" ");
   return `${(lastSpace > 32 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function uniqueIds(ids: string[]): string[] {
+  return Array.from(new Set(ids));
+}
+
+function patchWorkflowNode(
+  workflow: Workflow,
+  nodeId: string,
+  patch: Partial<WorkflowNode["data"]>,
+  position?: WorkflowNode["position"],
+): Workflow {
+  const nodeIds = new Set(workflow.nodes.map((node) => node.id));
+  if (!nodeIds.has(nodeId)) return workflow;
+
+  const current = workflow.nodes.find((node) => node.id === nodeId)!;
+  const parentIds = patch.parentIds
+    ? uniqueIds(
+        asStringArray(patch.parentIds).filter(
+          (id) => id !== nodeId && nodeIds.has(id),
+        ),
+      )
+    : asStringArray(current.data.parentIds);
+  const childrenIds = patch.childrenIds
+    ? uniqueIds(
+        asStringArray(patch.childrenIds).filter(
+          (id) => id !== nodeId && nodeIds.has(id),
+        ),
+      )
+    : asStringArray(current.data.childrenIds);
+
+  const nodes = workflow.nodes.map((node) => {
+    if (node.id === nodeId) {
+      return {
+        ...node,
+        position: position ?? node.position,
+        data: {
+          ...node.data,
+          ...patch,
+          parentIds,
+          childrenIds,
+        },
+      };
+    }
+
+    const nextParentIds = new Set(asStringArray(node.data.parentIds));
+    const nextChildrenIds = new Set(asStringArray(node.data.childrenIds));
+
+    if (parentIds.includes(node.id)) nextChildrenIds.add(nodeId);
+    else nextChildrenIds.delete(nodeId);
+
+    if (childrenIds.includes(node.id)) nextParentIds.add(nodeId);
+    else nextParentIds.delete(nodeId);
+
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        parentIds: Array.from(nextParentIds),
+        childrenIds: Array.from(nextChildrenIds),
+      },
+    };
+  });
+
+  const edges = nodes.flatMap((node) =>
+    node.data.childrenIds
+      .filter((childId) => nodeIds.has(childId))
+      .map((childId) => ({
+        id: `e:${node.id}-${childId}`,
+        source: node.id,
+        target: childId,
+      })),
+  );
+
+  return { nodes, edges };
 }
 
 /**
@@ -178,12 +262,72 @@ router.post("/:id/generate", async (req: Request, res: Response) => {
 
   await sleep(env.mockLatencyMs);
 
-  const workflow = generateWorkflow(existing.hypothesis, existing.prePlan);
+  const workflow = generateWorkflow(
+    existing.hypothesis,
+    existing.prePlan,
+    existing.papers ?? [],
+  );
   const updated = await repo.attachWorkflow(id, workflow);
   if (!updated) {
     res
       .status(500)
       .json({ ok: false, error: "Project disappeared mid-generation." });
+    return;
+  }
+
+  res.status(200).json({ ok: true, project: updated });
+});
+
+/**
+ * PATCH /api/projects/:id/workflow/nodes/:nodeId
+ *
+ * Body: `{ "data": Partial<WorkflowNode["data"]>, "position"?: { x, y } }`
+ *
+ * Updates the rich workflow node payload and keeps parent/child relationship
+ * fields plus React Flow edges in sync.
+ */
+router.patch("/:id/workflow/nodes/:nodeId", async (req: Request, res: Response) => {
+  const id = paramId(req.params.id);
+  const nodeId = paramId(req.params.nodeId);
+  if (!id || !nodeId) {
+    res.status(400).json({ ok: false, error: "Missing project or node id." });
+    return;
+  }
+
+  const existing = await repo.get(id);
+  if (!existing) {
+    res.status(404).json({ ok: false, error: "Project not found." });
+    return;
+  }
+  if (!existing.workflow) {
+    res.status(400).json({ ok: false, error: "Project has no workflow." });
+    return;
+  }
+  if (!existing.workflow.nodes.some((node) => node.id === nodeId)) {
+    res.status(404).json({ ok: false, error: "Workflow node not found." });
+    return;
+  }
+
+  const data =
+    req.body && typeof req.body.data === "object" && req.body.data !== null
+      ? (req.body.data as Partial<WorkflowNode["data"]>)
+      : null;
+  if (!data) {
+    res.status(400).json({ ok: false, error: "`data` patch is required." });
+    return;
+  }
+
+  const position =
+    req.body &&
+    typeof req.body.position?.x === "number" &&
+    typeof req.body.position?.y === "number"
+      ? (req.body.position as WorkflowNode["position"])
+      : undefined;
+
+  const workflow = patchWorkflowNode(existing.workflow, nodeId, data, position);
+  const updated = await repo.attachWorkflow(id, workflow);
+  if (!updated) {
+    res.status(500).json({ ok: false, error: "Project disappeared mid-update." });
     return;
   }
 

@@ -8,7 +8,7 @@
  */
 
 import type { Attachment } from "@/components/PromptInput";
-import type { Project } from "@/lib/projects";
+import type { Project, WorkflowNode } from "@/lib/projects";
 
 // ---------------------------------------------------------------------------
 // Chat (legacy stub — left in place for backwards compatibility)
@@ -178,6 +178,19 @@ export async function listProjects(): Promise<Project[]> {
 export async function getProject(id: string): Promise<Project> {
   const res = await jsonRequest<{ project: Project }>(
     `/api/projects/${encodeURIComponent(id)}`,
+  );
+  return res.project;
+}
+
+export async function updateWorkflowNode(
+  projectId: string,
+  nodeId: string,
+  data: Partial<WorkflowNode["data"]>,
+  position?: WorkflowNode["position"],
+): Promise<Project> {
+  const res = await jsonRequest<{ project: Project }>(
+    `/api/projects/${encodeURIComponent(projectId)}/workflow/nodes/${encodeURIComponent(nodeId)}`,
+    { method: "PATCH", body: { data, position } },
   );
   return res.project;
 }

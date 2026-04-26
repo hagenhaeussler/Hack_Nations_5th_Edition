@@ -34,21 +34,43 @@ export type WorkflowIconKey =
   | "clipboard-check";
 
 export interface WorkflowNodeData extends Record<string, unknown> {
-  title: string;
-  /** e.g. "Week 1" or "Week 3–4" */
-  schedule?: string;
-  /** Short detail line shown on the card itself. */
-  detail?: string;
-  status: WorkflowStatus;
-  icon: WorkflowIconKey;
-  /** Longer prose surfaced in the detail panel. */
-  description?: string;
-  /** Effort / duration estimate, e.g. "2 days", "1 week". */
-  effort?: string;
-  /** Concrete artifacts produced by this step. */
-  deliverables?: string[];
-  /** Tasks the user can tick off. */
-  checklist?: string[];
+  id: string;
+  stepName: string;
+  people: string[];
+  equipment: string[];
+  materials: string[];
+  timeEstimate: string;
+  price: string;
+  experts: string[];
+  citationsToPaper: string[];
+  procedure: string;
+  validationCriteria: string[];
+  startDate: string;
+  parentIds: string[];
+  childrenIds: string[];
+  status?: WorkflowStatus;
+  icon?: WorkflowIconKey;
+}
+
+export const TIMELINE_DAY_WIDTH = 36;
+export const TIMELINE_TRACK_HEIGHT = 160;
+export const TIMELINE_MIN_NODE_WIDTH = 180;
+
+export function parseDurationDays(timeEstimate: string | undefined): number {
+  if (!timeEstimate) return 1;
+  const normalized = timeEstimate.toLowerCase();
+  const numbers = normalized.match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+  const amount = numbers.length > 0 ? Math.max(...numbers) : 1;
+  if (normalized.includes("week")) return amount * 7;
+  if (normalized.includes("month")) return amount * 30;
+  if (normalized.includes("hour")) return Math.max(amount / 24, 0.25);
+  return amount;
+}
+
+export function getWorkflowNodeWidth(data: WorkflowNodeData): number {
+  const legacy = data as WorkflowNodeData & { effort?: string };
+  const days = parseDurationDays(data.timeEstimate ?? legacy.effort);
+  return Math.max(TIMELINE_MIN_NODE_WIDTH, Math.round(days * TIMELINE_DAY_WIDTH));
 }
 
 const ICON_MAP: Record<WorkflowIconKey, LucideIcon> = {
@@ -76,13 +98,26 @@ const ICON_MAP: Record<WorkflowIconKey, LucideIcon> = {
  * accent reserved for the currently-active step.
  */
 export function WorkflowNode({ data, selected }: NodeProps) {
-  const { title, schedule, detail, status, icon } = data as WorkflowNodeData;
+  const nodeData = data as WorkflowNodeData;
+  const legacyData = nodeData as WorkflowNodeData & {
+    title?: string;
+    effort?: string;
+    schedule?: string;
+  };
+  const status = nodeData.status ?? "upcoming";
+  const icon = nodeData.icon ?? "beaker";
   const Icon = ICON_MAP[icon] ?? Beaker;
+  const width = getWorkflowNodeWidth(nodeData);
+  const stepName = nodeData.stepName ?? legacyData.title ?? "Untitled step";
+  const startDate = nodeData.startDate ?? legacyData.schedule;
+  const timeEstimate = nodeData.timeEstimate ?? legacyData.effort ?? "1 day";
+  const price = nodeData.price ?? "$0";
 
   return (
     <div
+      style={{ width }}
       className={cn(
-        "group relative flex w-[220px] cursor-pointer items-start gap-3 rounded-md border bg-bg-surface px-3 py-2.5 shadow-sm",
+        "group relative flex cursor-pointer items-start gap-3 rounded-md border bg-bg-surface px-3 py-2.5 shadow-sm",
         "transition-shadow duration-[var(--duration-fast)] hover:shadow-md",
         status === "active"
           ? "border-[color:var(--accent)]"
@@ -112,20 +147,18 @@ export function WorkflowNode({ data, selected }: NodeProps) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <StatusDot status={status} />
-          {schedule && (
+          {startDate && (
             <span className="text-[10px] font-medium uppercase tracking-[0.06em] text-text-tertiary">
-              {schedule}
+              {startDate}
             </span>
           )}
         </div>
         <p className="mt-0.5 truncate text-[13px] font-medium text-text-primary">
-          {title}
+          {stepName}
         </p>
-        {detail && (
-          <p className="mt-0.5 line-clamp-2 text-[11.5px] leading-[1.45] text-text-secondary">
-            {detail}
-          </p>
-        )}
+        <p className="mt-0.5 line-clamp-2 text-[11.5px] leading-[1.45] text-text-secondary">
+          {timeEstimate} · {price}
+        </p>
       </div>
 
       <Handle
