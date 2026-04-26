@@ -42,7 +42,7 @@ export function SimilarPapersPanel({
       aria-label="Similar papers"
       className={cn(
         "fixed inset-y-0 right-0 z-30 flex w-full flex-col border-l border-[color:var(--border-default)]",
-        "bg-bg-surface shadow-lg lg:w-1/2",
+        "bg-bg-surface shadow-lg md:w-1/2",
         "animate-slide-in-right",
       )}
     >

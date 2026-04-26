@@ -48,8 +48,9 @@ export function SidebarRail({
 }: SidebarRailProps = {}) {
   return (
     <>
-      {/* Top-left brand */}
-      <header className="pointer-events-none absolute left-6 top-5 z-20 flex items-center gap-2.5 sm:left-8 sm:top-6">
+      {/* Top-left brand — pinned to the viewport so it stays put on
+       *  scrollable pages (e.g. Lab Settings overflow). */}
+      <header className="pointer-events-none fixed left-6 top-5 z-20 flex items-center gap-2.5 sm:left-8 sm:top-6">
         {onOpenHome ? (
           <button
             type="button"
@@ -75,10 +76,11 @@ export function SidebarRail({
         )}
       </header>
 
-      {/* Bottom-left settings */}
+      {/* Bottom-left settings — pinned to the viewport for the same reason
+       *  as the brand wordmark. */}
       <nav
         aria-label="Workspace settings"
-        className="absolute bottom-5 left-4 z-20 flex flex-col gap-0.5 sm:bottom-6 sm:left-6"
+        className="fixed bottom-5 left-4 z-20 flex flex-col gap-0.5 sm:bottom-6 sm:left-6"
       >
         <RailButton
           icon={<FlaskConical size={16} strokeWidth={1.5} />}
