@@ -61,14 +61,18 @@ export function LandingPage() {
   if (pendingPrompt) {
     return (
       <LoadingScreen
-        eyebrow="Reviewing the literature"
-        title="Reading the field for you"
-        detail="Surfacing related work — this usually takes about ten seconds."
+        eyebrow="Researching"
+        title="Finding useful signals"
+        detail="Looking through related work."
         prompt={pendingPrompt}
+        estimatedDurationMs={12000}
+        progressLabel="Research progress"
+        visual="papers"
         steps={[
-          "Searching related abstracts",
-          "Scoring similarity to your hypothesis",
-          "Ranking the most useful matches",
+          { label: "Searching papers", progress: 12 },
+          { label: "Reading abstracts", progress: 38 },
+          { label: "Extrating related information", progress: 64 },
+          { label: "Ranking matches", progress: 84 },
         ]}
       />
     );

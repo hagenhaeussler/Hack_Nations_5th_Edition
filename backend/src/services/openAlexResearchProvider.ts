@@ -25,6 +25,7 @@ interface OpenAlexWork {
   best_oa_location?: OpenAlexLocation | null;
   abstract_inverted_index?: Record<string, number[]> | null;
   cited_by_count?: number | null;
+  is_xpac?: boolean | null;
   referenced_works?: string[];
   related_works?: string[];
   open_access?: {
@@ -40,6 +41,10 @@ interface OpenAlexListResponse {
 
 const OPENALEX_BASE_URL = "https://api.openalex.org";
 const MAX_ABSTRACT_CHARS = 2400;
+const OPENALEX_USER_AGENT = "LabPilot/0.1 OpenAlex semantic search";
+const OPENALEX_RETRY_DELAYS_MS = [1000, 2500];
+
+type OpenAlexSearchMode = "semantic" | "keyword";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -47,6 +52,51 @@ function clamp(value: number, min: number, max: number): number {
 
 function unique(values: string[]): string[] {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function cleanSearchText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function keywordFallbackQuery(hypothesis: string): string {
+  const stopWords = new Set([
+    "about",
+    "across",
+    "against",
+    "also",
+    "under",
+    "using",
+    "want",
+    "whether",
+    "which",
+    "with",
+    "within",
+    "should",
+    "experiment",
+    "prototype",
+    "conditions",
+    "condition",
+    "several",
+    "determine",
+    "evaluate",
+    "generate",
+    "measure",
+    "compare",
+    "previous",
+    "matched",
+    "relevant",
+    "normal",
+  ]);
+  const tokens = hypothesis
+    .match(/[a-zA-Z][a-zA-Z0-9-]{2,}/g)
+    ?.map((token) => token.toLowerCase())
+    .filter((token) => !stopWords.has(token)) ?? [];
+  const query = unique(tokens).slice(0, 16).join(" ");
+  return query || cleanSearchText(hypothesis).slice(0, 240);
 }
 
 function normalizeOpenAlexWorkId(value: string | null | undefined): string | null {
@@ -88,21 +138,28 @@ function queryCandidates(args: {
   hypothesis: string;
   domain: string;
   queries: string[];
-}): string[] {
+}, mode: OpenAlexSearchMode): string[] {
+  if (mode === "semantic") {
+    return [cleanSearchText(args.hypothesis)].filter(Boolean);
+  }
+
   return unique([
-    args.hypothesis,
+    keywordFallbackQuery(args.hypothesis),
     ...args.queries,
-    args.domain ? `${args.domain} ${args.hypothesis}` : "",
+    args.domain ? `${args.domain} ${keywordFallbackQuery(args.hypothesis)}` : "",
   ]).slice(0, config.openAlex.maxQueries);
 }
 
-function buildOpenAlexUrl(search: string, perPage: number): string {
+function buildOpenAlexUrl(search: string, perPage: number, mode: OpenAlexSearchMode): string {
   const url = new URL("/works", OPENALEX_BASE_URL);
-  // OpenAlex ranks `/works?search=` by text relevance across titles,
-  // abstracts, and indexed full text. Keep every provider query on this path.
-  url.searchParams.set("search", search);
-  url.searchParams.set("filter", "has_abstract:true");
-  url.searchParams.set("per_page", String(perPage));
+  // The OpenAlex web UI's semantic mode maps to `search.semantic`, which works
+  // much better for paragraph-length experiment descriptions than keyword search.
+  url.searchParams.set(mode === "semantic" ? "search.semantic" : "search", search);
+  url.searchParams.set("include_xpac", "true");
+  if (mode === "keyword") {
+    url.searchParams.set("filter", "has_abstract:true");
+  }
+  url.searchParams.set("per_page", String(mode === "semantic" ? Math.min(perPage, 50) : perPage));
   url.searchParams.set(
     "select",
     [
@@ -116,6 +173,7 @@ function buildOpenAlexUrl(search: string, perPage: number): string {
       "best_oa_location",
       "abstract_inverted_index",
       "cited_by_count",
+      "is_xpac",
       "referenced_works",
       "related_works",
       "open_access",
@@ -131,13 +189,20 @@ function buildOpenAlexUrl(search: string, perPage: number): string {
   return url.toString();
 }
 
-async function fetchWorks(search: string, perPage: number): Promise<OpenAlexWork[]> {
+async function fetchWorksOnce(
+  search: string,
+  perPage: number,
+  mode: OpenAlexSearchMode,
+): Promise<OpenAlexWork[]> {
   const startedAt = Date.now();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.openAlex.timeoutMs);
   try {
-    const response = await fetch(buildOpenAlexUrl(search, perPage), {
-      headers: { Accept: "application/json" },
+    const response = await fetch(buildOpenAlexUrl(search, perPage, mode), {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": OPENALEX_USER_AGENT,
+      },
       signal: controller.signal,
     });
     if (!response.ok) {
@@ -145,6 +210,7 @@ async function fetchWorks(search: string, perPage: number): Promise<OpenAlexWork
     }
     const works = asOpenAlexWorks(await response.json());
     logger.info("openalex.semantic_search.completed", {
+      searchMode: mode,
       queryLength: search.length,
       perPage,
       resultCount: works.length,
@@ -159,6 +225,31 @@ async function fetchWorks(search: string, perPage: number): Promise<OpenAlexWork
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function fetchWorks(
+  search: string,
+  perPage: number,
+  mode: OpenAlexSearchMode,
+): Promise<OpenAlexWork[]> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= OPENALEX_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      return await fetchWorksOnce(search, perPage, mode);
+    } catch (err) {
+      lastError = err;
+      if (attempt >= OPENALEX_RETRY_DELAYS_MS.length) break;
+      const delayMs = OPENALEX_RETRY_DELAYS_MS[attempt] ?? 0;
+      logger.warn("openalex.semantic_search.retrying", {
+        searchMode: mode,
+        attempt: attempt + 1,
+        delayMs,
+        reason: err instanceof Error ? err.message : "OpenAlex query failed.",
+      });
+      await sleep(delayMs);
+    }
+  }
+  throw lastError;
 }
 
 function relevanceFor(rank: number, citedByCount: number | null | undefined): number {
@@ -218,6 +309,7 @@ function workToSource(work: OpenAlexWork, rank: number): ResearchSource | null {
       pdf_url: pdfUrl,
       type: work.type ?? null,
       cited_by_count: work.cited_by_count ?? 0,
+      is_xpac: work.is_xpac ?? null,
       is_open_access: work.open_access?.is_oa ?? null,
       oa_status: work.open_access?.oa_status ?? null,
       referenced_openalex_ids: referencedOpenAlexIds,
@@ -260,31 +352,22 @@ export async function searchOpenAlexResearch(args: {
   queries: string[];
 }): Promise<ResearchSource[]> {
   const maxResults = config.openAlex.maxResults;
-  const candidates = queryCandidates(args);
-  const perQuery = clamp(Math.ceil(maxResults / Math.max(candidates.length, 1)) + 2, 5, 100);
+  const semanticCandidates = queryCandidates(args, "semantic");
+  const keywordCandidates = queryCandidates(args, "keyword");
+  const perQuery = clamp(maxResults, 5, 50);
   const byId = new Map<string, ResearchSource>();
+  let queryFailures = 0;
   let rank = 0;
 
   logger.info("openalex.research.started", {
-    queryCount: candidates.length,
+    queryCount: semanticCandidates.length,
+    keywordFallbackQueryCount: keywordCandidates.length,
+    searchMode: "semantic",
     maxResults,
     timeoutMs: config.openAlex.timeoutMs,
   });
 
-  const settled = await Promise.allSettled(
-    candidates.map(async (query) => ({
-      query,
-      works: await fetchWorks(query, perQuery),
-    })),
-  );
-
-  for (const result of settled) {
-    if (result.status === "rejected") {
-      const reason = result.reason instanceof Error ? result.reason.message : "OpenAlex query failed.";
-      logger.warn("openalex.semantic_search.failed", { reason });
-      continue;
-    }
-    const { works } = result.value;
+  const collectWorks = (works: OpenAlexWork[]) => {
     for (const work of works) {
       const source = workToSource(work, rank);
       rank += 1;
@@ -292,13 +375,46 @@ export async function searchOpenAlexResearch(args: {
       byId.set(source.external_id, source);
       if (byId.size >= maxResults) break;
     }
+  };
+
+  for (const query of semanticCandidates) {
+    let works: OpenAlexWork[];
+    try {
+      works = await fetchWorks(query, perQuery, "semantic");
+    } catch (err) {
+      queryFailures += 1;
+      const reason = err instanceof Error ? err.message : "OpenAlex query failed.";
+      logger.warn("openalex.semantic_search.failed", { reason });
+      continue;
+    }
+    collectWorks(works);
     if (byId.size >= maxResults) break;
+  }
+
+  if (byId.size === 0) {
+    logger.warn("openalex.semantic_search.falling_back_to_keyword", {
+      queryCount: keywordCandidates.length,
+    });
+    const keywordPerQuery = clamp(Math.ceil(maxResults / Math.max(keywordCandidates.length, 1)) + 2, 5, 100);
+    for (const query of keywordCandidates) {
+      let works: OpenAlexWork[];
+      try {
+        works = await fetchWorks(query, keywordPerQuery, "keyword");
+      } catch (err) {
+        queryFailures += 1;
+        const reason = err instanceof Error ? err.message : "OpenAlex keyword query failed.";
+        logger.warn("openalex.keyword_search.failed", { reason });
+        continue;
+      }
+      collectWorks(works);
+      if (byId.size >= maxResults) break;
+    }
   }
 
   const sources = keepOnlyFetchedPaperLinks(Array.from(byId.values()));
   logger.info("openalex.research.completed", {
     sourceCount: sources.length,
-    queryFailures: settled.filter((result) => result.status === "rejected").length,
+    queryFailures,
   });
   return sources;
 }

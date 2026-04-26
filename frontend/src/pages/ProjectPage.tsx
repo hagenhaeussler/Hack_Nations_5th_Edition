@@ -108,7 +108,14 @@ export function ProjectPage() {
       <LoadingScreen
         eyebrow="Loading"
         title="Opening project"
-        detail="Fetching the latest snapshot of this project."
+        detail="Getting the latest version ready."
+        estimatedDurationMs={2800}
+        progressLabel="Loading progress"
+        steps={[
+          { label: "Fetching", progress: 20 },
+          { label: "Preparing", progress: 58 },
+          { label: "Opening", progress: 84 },
+        ]}
       />
     );
   }
@@ -128,14 +135,18 @@ export function ProjectPage() {
   if (generating || project.status === "generating") {
     return (
       <LoadingScreen
-        eyebrow="Designing the experiment"
-        title="Drafting your calendar"
-        detail="Placing scheduled tasks into day buckets for the experiment calendar."
+        eyebrow="Planning"
+        title="Building your Workflow"
+        detail="Turning the research into a simple experiment timeline."
         prompt={project.hypothesis}
+        estimatedDurationMs={14000}
+        progressLabel="Calendar progress"
+        visual="timeline"
         steps={[
-          "Drafting scheduled task cards",
-          "Grouping work into week and day buckets",
-          "Estimating effort, resources, and budget",
+          { label: "Collecting tasks", progress: 14 },
+          { label: "Scheduling the timeline", progress: 42 },
+          { label: "Processing dependencies", progress: 68 },
+          { label: "Personalising process", progress: 86 },
         ]}
       />
     );
@@ -144,10 +155,17 @@ export function ProjectPage() {
   if (project.status === "researching") {
     return (
       <LoadingScreen
-        eyebrow="Reviewing the literature"
-        title="Reading the field"
-        detail="Surfacing related work for your hypothesis."
+        eyebrow="Researching"
+        title="Finishing the literature pass"
+        detail="A few results are still coming together."
         prompt={project.hypothesis}
+        estimatedDurationMs={12000}
+        progressLabel="Research progress"
+        steps={[
+          { label: "Reading", progress: 28 },
+          { label: "Scoring", progress: 58 },
+          { label: "Saving", progress: 84 },
+        ]}
       />
     );
   }

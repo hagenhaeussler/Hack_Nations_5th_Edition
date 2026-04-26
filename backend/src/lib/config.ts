@@ -26,7 +26,7 @@ const openaiResearchStepTimeoutMs = Number.parseInt(
 const openAlexEnabled = process.env.OPENALEX_ENABLED !== "false";
 const openAlexMaxResults = Number.parseInt(process.env.OPENALEX_MAX_RESULTS ?? "24", 10);
 const openAlexMaxQueries = Number.parseInt(process.env.OPENALEX_MAX_QUERIES ?? "3", 10);
-const openAlexTimeoutMs = Number.parseInt(process.env.OPENALEX_TIMEOUT_MS ?? "8000", 10);
+const openAlexTimeoutMs = Number.parseInt(process.env.OPENALEX_TIMEOUT_MS ?? "30000", 10);
 
 const supabaseConfigured =
   hasValue(supabaseUrl) && (hasValue(supabaseServiceRoleKey) || hasValue(supabaseAnonKey));
