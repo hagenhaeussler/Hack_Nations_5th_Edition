@@ -69,6 +69,7 @@ interface Draft {
   people: string;
   equipment: string;
   materials: string;
+  personnelRequirement: string;
   timeEstimate: string;
   price: string;
   experts: string;
@@ -76,6 +77,7 @@ interface Draft {
   procedure: string;
   validationCriteria: string;
   startDate: string;
+  startDay: string;
   parentIds: string;
   childrenIds: string;
   status?: WorkflowStatus;
@@ -93,6 +95,23 @@ function splitLines(value: string): string[] {
     .filter(Boolean);
 }
 
+function defaultPersonnelRequirement(people: string[] | undefined): string {
+  const count = people?.length ?? 0;
+  if (count === 0) return "Personnel TBD";
+  return `${count} ${count === 1 ? "person" : "people"}`;
+}
+
+function formatStartDay(value: unknown): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? String(Math.max(0, Math.round(value)))
+    : "0";
+}
+
+function parseStartDay(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
 function dataToDraft(data: WorkflowNodeData): Draft {
   const legacy = data as WorkflowNodeData & {
     title?: string;
@@ -105,10 +124,13 @@ function dataToDraft(data: WorkflowNodeData): Draft {
     ...data,
     id: data.id ?? "",
     stepName: data.stepName ?? legacy.title ?? "Untitled step",
+    personnelRequirement:
+      data.personnelRequirement ?? defaultPersonnelRequirement(data.people),
     timeEstimate: data.timeEstimate ?? legacy.effort ?? "1 day",
     price: data.price ?? "$0",
     procedure: data.procedure ?? legacy.description ?? "",
     startDate: data.startDate ?? legacy.schedule ?? "",
+    startDay: formatStartDay(data.startDay),
     status: data.status ?? "upcoming",
     icon: data.icon ?? "beaker",
     people: joinLines(data.people ?? []),
@@ -125,6 +147,7 @@ function dataToDraft(data: WorkflowNodeData): Draft {
 function draftToData(draft: Draft): WorkflowNodeData {
   return {
     ...draft,
+    startDay: parseStartDay(draft.startDay),
     status: draft.status ?? "upcoming",
     icon: draft.icon ?? "beaker",
     people: splitLines(draft.people),
@@ -206,7 +229,7 @@ export function WorkflowNodeDetailPanel({
             {draft.stepName || "Untitled step"}
           </h2>
           <p className="mt-1 text-[13px] leading-[1.55] text-text-secondary">
-            {draft.startDate} · {draft.timeEstimate}
+            Day {draft.startDay} · {draft.timeEstimate}
           </p>
         </div>
 
@@ -237,10 +260,10 @@ export function WorkflowNodeDetailPanel({
           />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <TextField
-              label="Start date"
-              type="date"
-              value={draft.startDate}
-              onChange={(value) => updateField("startDate", value)}
+              label="Start day"
+              type="number"
+              value={draft.startDay}
+              onChange={(value) => updateField("startDay", value)}
             />
             <TextField
               label="Time estimate"
@@ -248,11 +271,18 @@ export function WorkflowNodeDetailPanel({
               onChange={(value) => updateField("timeEstimate", value)}
             />
           </div>
-          <TextField
-            label="Price"
-            value={draft.price}
-            onChange={(value) => updateField("price", value)}
-          />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <TextField
+              label="Price"
+              value={draft.price}
+              onChange={(value) => updateField("price", value)}
+            />
+            <TextField
+              label="Personnel requirement"
+              value={draft.personnelRequirement}
+              onChange={(value) => updateField("personnelRequirement", value)}
+            />
+          </div>
         </Section>
 
         <Section title="Procedure">
@@ -348,7 +378,7 @@ function TextField({
   label: string;
   value: string;
   onChange: (value: string) => void;
-  type?: "date" | "text";
+  type?: "date" | "number" | "text";
 }) {
   return (
     <label className="flex flex-col gap-1.5">

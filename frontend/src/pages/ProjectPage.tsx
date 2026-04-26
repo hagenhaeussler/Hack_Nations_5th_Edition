@@ -12,6 +12,7 @@ import { WorkflowNodeDetailPanel } from "@/components/timeline/WorkflowNodeDetai
 import {
   TIMELINE_DAY_WIDTH,
   TIMELINE_TRACK_HEIGHT,
+  parseDurationDays,
   type WorkflowNodeData,
 } from "@/components/timeline/WorkflowNode";
 import { generateProject, getProject, updateWorkflowNode } from "@/lib/api";
@@ -64,8 +65,37 @@ function getDayOffset(baseDate: Date, startDate: string | undefined): number {
   return Math.max(0, Math.round((date.getTime() - baseDate.getTime()) / MS_PER_DAY));
 }
 
+function getNodeStartDay(
+  node: Workflow["nodes"][number],
+  baseDate: Date,
+): number {
+  return typeof node.data.startDay === "number" && Number.isFinite(node.data.startDay)
+    ? Math.max(0, Math.round(node.data.startDay))
+    : getDayOffset(baseDate, node.data.startDate);
+}
+
 function snapTrack(y: number): number {
   return Math.round(y / TIMELINE_TRACK_HEIGHT) * TIMELINE_TRACK_HEIGHT;
+}
+
+function getMinimumStartDay(
+  workflow: Workflow,
+  baseDate: Date,
+  nodeId: string,
+): number {
+  const nodesById = new Map(workflow.nodes.map((node) => [node.id, node]));
+  const node = nodesById.get(nodeId);
+  if (!node) return 0;
+
+  return (node.data.parentIds ?? []).reduce((minimumDay, parentId) => {
+    const parent = nodesById.get(parentId);
+    if (!parent) return minimumDay;
+
+    const parentStartDay = getNodeStartDay(parent, baseDate);
+    const parentEndDay =
+      parentStartDay + Math.ceil(parseDurationDays(parent.data.timeEstimate));
+    return Math.max(minimumDay, parentEndDay);
+  }, 0);
 }
 
 /**
@@ -236,16 +266,19 @@ function ProjectWorkspaceView({
 
   const flowNodes = useMemo<Node<WorkflowNodeData>[]>(
     () =>
-      (workflow?.nodes ?? []).map((n, index) => ({
-        id: n.id,
-        type: "workflow",
-        position: {
-          x: getDayOffset(workflowBaseDate, n.data.startDate) * TIMELINE_DAY_WIDTH,
-          y: snapTrack(n.position.y),
-        },
-        data: n.data as WorkflowNodeData,
-        draggable: index !== 0,
-      })),
+      (workflow?.nodes ?? []).map((n, index) => {
+        const startDay = getNodeStartDay(n, workflowBaseDate);
+        return {
+          id: n.id,
+          type: "workflow",
+          position: {
+            x: startDay * TIMELINE_DAY_WIDTH,
+            y: snapTrack(n.position.y),
+          },
+          data: { ...n.data, startDay } as WorkflowNodeData,
+          draggable: index !== 0,
+        };
+      }),
     [workflow?.nodes, workflowBaseDate],
   );
 
@@ -283,20 +316,41 @@ function ProjectWorkspaceView({
       const firstNodeId = workflow?.nodes[0]?.id;
       if (!workflow || nodeId === firstNodeId) return;
 
-      const snappedX = Math.max(0, Math.round(position.x / TIMELINE_DAY_WIDTH) * TIMELINE_DAY_WIDTH);
+      const requestedDay = Math.max(0, Math.round(position.x / TIMELINE_DAY_WIDTH));
+      const startDay = Math.max(
+        requestedDay,
+        getMinimumStartDay(workflow, workflowBaseDate, nodeId),
+      );
+      const snappedX = startDay * TIMELINE_DAY_WIDTH;
       const snappedY = snapTrack(position.y);
       const startDate = formatWorkflowDate(
-        addWorkflowDays(workflowBaseDate, Math.round(snappedX / TIMELINE_DAY_WIDTH)),
+        addWorkflowDays(workflowBaseDate, startDay),
       );
 
       void updateWorkflowNode(
         project.id,
         nodeId,
-        { startDate },
+        { startDate, startDay },
         { x: snappedX, y: snappedY },
       ).then(onProjectChange);
     },
     [onProjectChange, project.id, workflow, workflowBaseDate],
+  );
+
+  const handleNodeConnect = useCallback(
+    (sourceId: string, targetId: string) => {
+      if (!workflow || sourceId === targetId) return;
+      const target = workflow.nodes.find((node) => node.id === targetId);
+      if (!target) return;
+
+      const parentIds = Array.from(
+        new Set([...(target.data.parentIds ?? []), sourceId]),
+      );
+      void updateWorkflowNode(project.id, targetId, { parentIds }).then(
+        onProjectChange,
+      );
+    },
+    [onProjectChange, project.id, workflow],
   );
 
   return (
@@ -317,6 +371,7 @@ function ProjectWorkspaceView({
               selectedNodeId={selectedNodeId}
               onNodeSelect={setSelectedNodeId}
               onNodeMove={handleNodeMove}
+              onNodeConnect={handleNodeConnect}
             />
           ) : (
             <div className="flex h-full items-center justify-center px-8 text-center">

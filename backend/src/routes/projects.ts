@@ -13,6 +13,9 @@ import { generateWorkflow } from "../lib/workflow.js";
 
 const router: Router = Router();
 const repo = getProjectsRepo();
+const DAY_WIDTH = 220;
+const TRACK_HEIGHT = 220;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** Sleep helper — simulates the real research / generation latency. */
 const sleep = (ms: number) =>
@@ -96,6 +99,184 @@ function uniqueIds(ids: string[]): string[] {
   return Array.from(new Set(ids));
 }
 
+function parseWorkflowDate(value: string | undefined): Date | null {
+  if (!value) return null;
+  const time = Date.parse(`${value}T00:00:00.000Z`);
+  return Number.isNaN(time) ? null : new Date(time);
+}
+
+function formatWorkflowDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function addWorkflowDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function durationDays(timeEstimate: string | undefined): number {
+  if (!timeEstimate) return 1;
+  const normalized = timeEstimate.toLowerCase();
+  const numbers = normalized.match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+  const amount = numbers.length > 0 ? Math.max(...numbers) : 1;
+  if (normalized.includes("week")) return Math.max(Math.ceil(amount * 7), 1);
+  if (normalized.includes("month")) return Math.max(Math.ceil(amount * 30), 1);
+  if (normalized.includes("hour")) return 1;
+  return Math.max(Math.ceil(amount), 1);
+}
+
+function workflowBaseDate(nodes: WorkflowNode[]): Date {
+  const dates = nodes
+    .map((node) => parseWorkflowDate(node.data.startDate))
+    .filter((date): date is Date => Boolean(date));
+  if (dates.length === 0) return new Date();
+  return new Date(Math.min(...dates.map((date) => date.getTime())));
+}
+
+function dayOffset(baseDate: Date, startDate: string | undefined): number {
+  const date = parseWorkflowDate(startDate);
+  if (!date) return 0;
+  return Math.max(0, Math.round((date.getTime() - baseDate.getTime()) / MS_PER_DAY));
+}
+
+function nodeStartDay(node: WorkflowNode | undefined, baseDate: Date): number {
+  if (
+    typeof node?.data.startDay === "number" &&
+    Number.isFinite(node.data.startDay)
+  ) {
+    return Math.max(0, Math.round(node.data.startDay));
+  }
+  return dayOffset(baseDate, node?.data.startDate);
+}
+
+function createsCycle(
+  adjacency: Map<string, Set<string>>,
+  source: string,
+  target: string,
+): boolean {
+  const stack = [target];
+  const seen = new Set<string>();
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (current === source) return true;
+    if (seen.has(current)) continue;
+    seen.add(current);
+    for (const childId of adjacency.get(current) ?? []) stack.push(childId);
+  }
+  return false;
+}
+
+function normalizeRelationships(nodes: WorkflowNode[]): WorkflowNode[] {
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const adjacency = new Map<string, Set<string>>(
+    nodes.map((node) => [node.id, new Set<string>()]),
+  );
+
+  for (const node of nodes) {
+    for (const childId of asStringArray(node.data.childrenIds)) {
+      if (childId === node.id || !nodeIds.has(childId)) continue;
+      if (createsCycle(adjacency, node.id, childId)) continue;
+      adjacency.get(node.id)?.add(childId);
+    }
+  }
+
+  const parentsByChild = new Map<string, string[]>(
+    nodes.map((node) => [node.id, []]),
+  );
+  const childrenByParent = new Map<string, string[]>(
+    nodes.map((node) => [node.id, []]),
+  );
+
+  for (const [source, children] of adjacency) {
+    for (const target of children) {
+      childrenByParent.get(source)?.push(target);
+      parentsByChild.get(target)?.push(source);
+    }
+  }
+
+  return nodes.map((node) => ({
+    ...node,
+    data: {
+      ...node.data,
+      parentIds: parentsByChild.get(node.id) ?? [],
+      childrenIds: childrenByParent.get(node.id) ?? [],
+    },
+  }));
+}
+
+function topologicalNodes(nodes: WorkflowNode[]): WorkflowNode[] {
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const indegree = new Map(nodes.map((node) => [node.id, 0]));
+  for (const node of nodes) {
+    for (const childId of asStringArray(node.data.childrenIds)) {
+      indegree.set(childId, (indegree.get(childId) ?? 0) + 1);
+    }
+  }
+
+  const queue = nodes
+    .filter((node) => (indegree.get(node.id) ?? 0) === 0)
+    .map((node) => node.id);
+  const ordered: WorkflowNode[] = [];
+
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    const node = nodesById.get(id);
+    if (!node) continue;
+    ordered.push(node);
+    for (const childId of asStringArray(node.data.childrenIds)) {
+      const next = (indegree.get(childId) ?? 0) - 1;
+      indegree.set(childId, next);
+      if (next === 0) queue.push(childId);
+    }
+  }
+
+  return ordered.length === nodes.length ? ordered : nodes;
+}
+
+function enforceDependencySchedule(nodes: WorkflowNode[]): WorkflowNode[] {
+  const baseDate = workflowBaseDate(nodes);
+  const scheduledById = new Map(nodes.map((node) => [node.id, { ...node }]));
+  const firstNodeId = nodes[0]?.id;
+
+  for (const node of topologicalNodes(nodes)) {
+    const current = scheduledById.get(node.id);
+    if (!current) continue;
+
+    const dependencyStartDay = asStringArray(current.data.parentIds).reduce(
+      (required, parentId) => {
+        const parent = scheduledById.get(parentId);
+        const parentEndDay =
+          nodeStartDay(parent, baseDate) + durationDays(parent?.data.timeEstimate);
+        return Math.max(required, parentEndDay);
+      },
+      0,
+    );
+    const currentStartDay =
+      current.id === firstNodeId
+        ? 0
+        : Math.max(nodeStartDay(current, baseDate), dependencyStartDay);
+
+    scheduledById.set(node.id, {
+      ...current,
+      data: {
+        ...current.data,
+        startDay: currentStartDay,
+        startDate: formatWorkflowDate(addWorkflowDays(baseDate, currentStartDay)),
+      },
+    });
+  }
+
+  const nextNodes = nodes.map((node) => scheduledById.get(node.id) ?? node);
+  return nextNodes.map((node) => ({
+    ...node,
+    position: {
+      x: nodeStartDay(node, baseDate) * DAY_WIDTH,
+      y: Math.round(node.position.y / TRACK_HEIGHT) * TRACK_HEIGHT,
+    },
+  }));
+}
+
 function patchWorkflowNode(
   workflow: Workflow,
   nodeId: string,
@@ -154,7 +335,9 @@ function patchWorkflowNode(
     };
   });
 
-  const edges = nodes.flatMap((node) =>
+  const normalizedNodes = enforceDependencySchedule(normalizeRelationships(nodes));
+
+  const edges = normalizedNodes.flatMap((node) =>
     node.data.childrenIds
       .filter((childId) => nodeIds.has(childId))
       .map((childId) => ({
@@ -164,7 +347,7 @@ function patchWorkflowNode(
       })),
   );
 
-  return { nodes, edges };
+  return { nodes: normalizedNodes, edges };
 }
 
 /**

@@ -23,6 +23,7 @@ export interface WorkflowNode {
     people: string[];
     equipment: string[];
     materials: string[];
+    personnelRequirement: string;
     timeEstimate: string;
     price: string;
     experts: string[];
@@ -30,6 +31,7 @@ export interface WorkflowNode {
     procedure: string;
     validationCriteria: string[];
     startDate: string;
+    startDay: number;
     parentIds: string[];
     childrenIds: string[];
     status?: "done" | "active" | "upcoming";

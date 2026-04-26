@@ -1,12 +1,12 @@
 import type { Paper, PrePlan, PrePlanNode, Workflow, WorkflowNode } from "./projectTypes.js";
 
-const DAY_WIDTH = 36;
+const DAY_WIDTH = 220;
+const TRACK_HEIGHT = 220;
 const TRACK_Y = {
-  framing: 0,
-  planning: 160,
-  prep: 320,
-  execution: 480,
-  analysis: 640,
+  main: 0,
+  upperBranch: -TRACK_HEIGHT,
+  lowerBranch: TRACK_HEIGHT,
+  lowerBranch2: TRACK_HEIGHT * 2,
 } as const;
 
 type Track = keyof typeof TRACK_Y;
@@ -47,6 +47,7 @@ function makeNode(input: {
   people: string[];
   equipment: string[];
   materials: string[];
+  personnelRequirement: string;
   timeEstimate: string;
   price: string;
   experts: string[];
@@ -70,6 +71,7 @@ function makeNode(input: {
       people: input.people,
       equipment: input.equipment,
       materials: input.materials,
+      personnelRequirement: input.personnelRequirement,
       timeEstimate: input.timeEstimate,
       price: input.price,
       experts: input.experts,
@@ -77,6 +79,7 @@ function makeNode(input: {
       procedure: input.procedure,
       validationCriteria: input.validationCriteria,
       startDate: input.startDate,
+      startDay: input.offsetDays,
       parentIds: input.parentIds ?? [],
       status: input.status,
       icon: input.icon,
@@ -126,6 +129,28 @@ function durationLabel(step: PrePlanNode): string {
   return value !== null ? `${value} ${unit}` : `Unknown ${unit}`;
 }
 
+function durationDaysFromLabel(timeEstimate: string | undefined): number {
+  if (!timeEstimate) return 1;
+  const normalized = timeEstimate.toLowerCase();
+  const numbers = normalized.match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+  const amount = numbers.length > 0 ? Math.max(...numbers) : 1;
+  if (normalized.includes("week")) return Math.max(Math.ceil(amount * 7), 1);
+  if (normalized.includes("month")) return Math.max(Math.ceil(amount * 30), 1);
+  if (normalized.includes("hour")) return 1;
+  return Math.max(Math.ceil(amount), 1);
+}
+
+function personnelRequirementLabel(step: PrePlanNode): string {
+  const count = step.people_required.count;
+  const roles = step.people_required.roles.filter(Boolean);
+  if (count !== null && roles.length > 0) {
+    return `${count} ${count === 1 ? "person" : "people"}: ${roles.join(", ")}`;
+  }
+  if (count !== null) return `${count} ${count === 1 ? "person" : "people"}`;
+  if (roles.length > 0) return roles.join(", ");
+  return "Personnel TBD";
+}
+
 function priceLabel(step: PrePlanNode): string {
   const { value, currency } = step.estimated_price;
   if (value === null) return "Unknown";
@@ -145,15 +170,6 @@ function iconForStep(step: PrePlanNode): string {
   if (/protocol|design|select|prepare/.test(text)) return "clipboard";
   if (/image|measure|microscope|assay/.test(text)) return "microscope";
   return "beaker";
-}
-
-function trackForStep(step: PrePlanNode): Track {
-  const text = `${step.step_name} ${step.step_purpose}`.toLowerCase();
-  if (/literature|source|review|design|protocol|select/.test(text)) return "planning";
-  if (/order|buy|reagent|material|prepare|sample|cell/.test(text)) return "prep";
-  if (/analy|sequence|data|statistic|result/.test(text)) return "analysis";
-  if (/hypothesis|goal|control|approval|validate/.test(text)) return "framing";
-  return "execution";
 }
 
 function topologicalPrePlanNodes(prePlan: PrePlan): PrePlanNode[] {
@@ -192,6 +208,64 @@ function topologicalPrePlanNodes(prePlan: PrePlan): PrePlanNode[] {
     : prePlan.dag.nodes;
 }
 
+function mainPrePlanPath(prePlan: PrePlan, orderedNodes: PrePlanNode[]): Set<string> {
+  const nodeIds = new Set(orderedNodes.map((node) => node.node_id));
+  const children = new Map<string, string[]>(
+    orderedNodes.map((node) => [node.node_id, []]),
+  );
+  const parents = new Map<string, string[]>(
+    orderedNodes.map((node) => [node.node_id, []]),
+  );
+
+  for (const edge of prePlan.dag.edges) {
+    if (!nodeIds.has(edge.from) || !nodeIds.has(edge.to)) continue;
+    children.get(edge.from)?.push(edge.to);
+    parents.get(edge.to)?.push(edge.from);
+  }
+
+  const nodesById = new Map(orderedNodes.map((node) => [node.node_id, node]));
+  const scoreMemo = new Map<string, number>();
+  const score = (id: string, visiting = new Set<string>()): number => {
+    const cached = scoreMemo.get(id);
+    if (cached !== undefined) return cached;
+    if (visiting.has(id)) return 0;
+    visiting.add(id);
+    const node = nodesById.get(id);
+    const own = durationDaysFromLabel(node ? durationLabel(node) : undefined);
+    const downstream = Math.max(
+      0,
+      ...((children.get(id) ?? []).map((childId) => score(childId, visiting))),
+    );
+    visiting.delete(id);
+    const total = own + downstream;
+    scoreMemo.set(id, total);
+    return total;
+  };
+
+  const root =
+    orderedNodes.find((node) => (parents.get(node.node_id) ?? []).length === 0)
+      ?.node_id ?? orderedNodes[0]?.node_id;
+  const path = new Set<string>();
+  let current = root;
+  while (current && !path.has(current)) {
+    path.add(current);
+    const next = (children.get(current) ?? [])
+      .slice()
+      .sort((a, b) => score(b) - score(a))[0];
+    current = next;
+  }
+  return path;
+}
+
+function branchTrackY(index: number): number {
+  const tracks = [
+    TRACK_Y.lowerBranch,
+    TRACK_Y.upperBranch,
+    TRACK_Y.lowerBranch2,
+  ];
+  return tracks[index % tracks.length] ?? TRACK_Y.lowerBranch;
+}
+
 function workflowFromPrePlan(
   prePlan: PrePlan,
   papers: Paper[],
@@ -201,15 +275,30 @@ function workflowFromPrePlan(
   const nodeIds = new Set(orderedNodes.map((node) => node.node_id));
   const fallbackCitations = citationLabels(papers);
   const fallbackExperts = expertLabels(papers);
+  const mainPath = mainPrePlanPath(prePlan, orderedNodes);
+  const startDayById = new Map<string, number>();
+  const durationDaysById = new Map<string, number>();
   const base = new Date(Date.UTC(
     startDate.getUTCFullYear(),
     startDate.getUTCMonth(),
     startDate.getUTCDate(),
   ));
+  let branchIndex = 0;
 
   return finishWorkflow(
     orderedNodes.map((node, index): WorkflowNodeDraft => {
       const parentIds = node.parent_ids.filter((id) => nodeIds.has(id));
+      const earliestStartDay = Math.max(
+        0,
+        ...parentIds.map((parentId) => {
+          const parentStartDay = startDayById.get(parentId) ?? 0;
+          const parentDuration = durationDaysById.get(parentId) ?? 1;
+          return parentStartDay + parentDuration;
+        }),
+      );
+      const duration = durationDaysFromLabel(durationLabel(node));
+      startDayById.set(node.node_id, earliestStartDay);
+      durationDaysById.set(node.node_id, duration);
       const evidence = node.source_citations.map((citation) =>
         citation.quote_or_evidence
           ? `${citation.document_id}: ${citation.quote_or_evidence}`
@@ -220,14 +309,14 @@ function workflowFromPrePlan(
           ? `${expert.name}, ${expert.affiliation}`
           : expert.name,
       );
-      const lane = parentIds.length > 1 ? index % 3 : 1;
-      const track = trackForStep(node);
+      const isMainPath = mainPath.has(node.node_id);
+      const y = isMainPath ? TRACK_Y.main : branchTrackY(branchIndex++);
 
       return {
         id: node.node_id,
         position: {
-          x: index * 8 * DAY_WIDTH,
-          y: TRACK_Y[track] + (lane - 1) * 44,
+          x: earliestStartDay * DAY_WIDTH,
+          y,
         },
         data: {
           id: node.node_id,
@@ -241,6 +330,7 @@ function workflowFromPrePlan(
             node.materials_required.map((item) => item.name),
             "Materials to be confirmed",
           ),
+          personnelRequirement: personnelRequirementLabel(node),
           timeEstimate: durationLabel(node),
           price: priceLabel(node),
           experts: compactList([...experts, ...fallbackExperts], "Domain expert"),
@@ -253,7 +343,8 @@ function workflowFromPrePlan(
             node.validation_criteria,
             "Validation criteria to be confirmed",
           ),
-          startDate: node.start.date ?? formatIsoDate(addDays(base, index * 2)),
+          startDate: formatIsoDate(addDays(base, earliestStartDay)),
+          startDay: earliestStartDay,
           parentIds,
           status: index === 0 ? "active" : "upcoming",
           icon: iconForStep(node),
@@ -297,10 +388,11 @@ export function generateWorkflow(
       id: "hypothesis",
       stepName: "Frame the hypothesis",
       offsetDays: 0,
-      track: "framing",
+      track: "main",
       people: ["Principal investigator"],
       equipment: ["Project notebook"],
       materials: ["Original research question"],
+      personnelRequirement: "1 person: Principal investigator",
       timeEstimate: "1 day",
       price: "$0",
       experts: experts.slice(0, 2),
@@ -319,10 +411,11 @@ export function generateWorkflow(
       id: "literature",
       stepName: "Literature review",
       offsetDays: 1,
-      track: "planning",
+      track: "main",
       people: ["Graduate researcher", "Principal investigator"],
       equipment: ["Reference manager", "Paper database access"],
       materials: ["Search keywords", "Related work exports"],
+      personnelRequirement: "2 people: Graduate researcher, Principal investigator",
       timeEstimate: "5 days",
       price: "$250",
       experts: experts.slice(0, 4),
@@ -342,10 +435,11 @@ export function generateWorkflow(
       id: "design",
       stepName: "Experimental design",
       offsetDays: 6,
-      track: "planning",
+      track: "main",
       people: ["Principal investigator", "Postdoctoral fellow", "Statistician"],
       equipment: ["Power analysis worksheet"],
       materials: ["Assay options", "Control matrix"],
+      personnelRequirement: "3 people: Principal investigator, postdoctoral fellow, statistician",
       timeEstimate: "5 days",
       price: "$600",
       experts: experts.slice(0, 3),
@@ -365,10 +459,11 @@ export function generateWorkflow(
       id: "reagents",
       stepName: "Order reagents and consumables",
       offsetDays: 11,
-      track: "prep",
+      track: "lowerBranch",
       people: ["Lab manager", "Research assistant"],
       equipment: ["Procurement system", "Cold storage"],
       materials: ["Antibodies", "Primers", "Media", "Plasticware"],
+      personnelRequirement: "2 people: Lab manager, research assistant",
       timeEstimate: "7 days",
       price: "$11,400",
       experts: ["Lab manager", ...experts.slice(0, 1)],
@@ -388,10 +483,11 @@ export function generateWorkflow(
       id: "protocol",
       stepName: "Draft the protocol",
       offsetDays: 11,
-      track: "planning",
+      track: "lowerBranch2",
       people: ["Postdoctoral fellow", "Lead experimentalist"],
       equipment: ["SOP template", "Bench layout"],
       materials: ["Experimental design memo", "Safety requirements"],
+      personnelRequirement: "2 people: Postdoctoral fellow, lead experimentalist",
       timeEstimate: "4 days",
       price: "$1,200",
       experts: experts.slice(0, 2),
@@ -411,10 +507,11 @@ export function generateWorkflow(
       id: "controls",
       stepName: "Plan controls and approvals",
       offsetDays: 11,
-      track: "framing",
+      track: "upperBranch",
       people: ["Principal investigator", "Compliance reviewer"],
       equipment: ["Approval portal"],
       materials: ["Control samples", "Ethics forms"],
+      personnelRequirement: "2 people: Principal investigator, compliance reviewer",
       timeEstimate: "5 days",
       price: "$980",
       experts: ["Compliance reviewer", ...experts.slice(0, 1)],
@@ -434,10 +531,11 @@ export function generateWorkflow(
       id: "pilot",
       stepName: "Pilot run",
       offsetDays: 18,
-      track: "execution",
+      track: "main",
       people: ["Lead experimentalist", "Research assistant"],
       equipment: ["Bench setup", "Plate reader or microscope"],
       materials: ["Pilot aliquots", "Prepared controls"],
+      personnelRequirement: "2 people: Lead experimentalist, research assistant",
       timeEstimate: "3 days",
       price: "$2,400",
       experts: experts.slice(0, 2),
@@ -457,10 +555,11 @@ export function generateWorkflow(
       id: "refine",
       stepName: "Refine the protocol",
       offsetDays: 21,
-      track: "planning",
+      track: "main",
       people: ["Postdoctoral fellow", "Lead experimentalist"],
       equipment: ["Versioned SOP"],
       materials: ["Pilot issue log", "Pilot data"],
+      personnelRequirement: "2 people: Postdoctoral fellow, lead experimentalist",
       timeEstimate: "3 days",
       price: "$900",
       experts: experts.slice(0, 2),
@@ -480,10 +579,11 @@ export function generateWorkflow(
       id: "main",
       stepName: "Main experiment",
       offsetDays: 24,
-      track: "execution",
+      track: "main",
       people: ["Lead experimentalist", "Research assistant"],
       equipment: ["Final assay setup", "Data capture workstation"],
       materials: ["Full reagent set", "Experimental samples", "Controls"],
+      personnelRequirement: "2 people: Lead experimentalist, research assistant",
       timeEstimate: "15 days",
       price: "$9,800",
       experts: experts.slice(0, 3),
@@ -503,10 +603,11 @@ export function generateWorkflow(
       id: "analysis",
       stepName: "Data analysis",
       offsetDays: 39,
-      track: "analysis",
+      track: "main",
       people: ["Bioinformatician", "Statistician"],
       equipment: ["Analysis workstation", "Versioned notebook"],
       materials: ["Raw data", "Analysis plan"],
+      personnelRequirement: "2 people: Bioinformatician, statistician",
       timeEstimate: "5 days",
       price: "$3,200",
       experts: experts.slice(0, 3),
@@ -526,10 +627,11 @@ export function generateWorkflow(
       id: "manuscript",
       stepName: "Manuscript draft",
       offsetDays: 44,
-      track: "analysis",
+      track: "main",
       people: ["Principal investigator", "First author"],
       equipment: ["Manuscript workspace", "Figure export pipeline"],
       materials: ["Final figures", "Methods SOP", "Analysis outputs"],
+      personnelRequirement: "2 people: Principal investigator, first author",
       timeEstimate: "7 days",
       price: "$1,500",
       experts: experts.slice(0, 4),
