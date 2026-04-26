@@ -195,15 +195,17 @@ function ScoreChart({
               type="button"
               onClick={() => onSelect(evaluation.id)}
               title={`${evaluation.project_title} | ${evaluation.plan_title} | ${formatDate(evaluation.created_at)} | ${evaluation.overall_score}/100 | Strongest: ${CATEGORY_LABELS[strongestCategory(evaluation)]} | Weakest: ${CATEGORY_LABELS[weakestCategory(evaluation)]}`}
-              className="group flex min-w-[44px] flex-1 flex-col items-center gap-2"
+              className="group flex h-full min-w-[44px] flex-1 flex-col items-center justify-end gap-2"
             >
-              <div
-                className={cn(
-                  "w-full rounded-t-sm transition-colors",
-                  selected ? "bg-accent" : "bg-[color:var(--border-strong)] group-hover:bg-accent",
-                )}
-                style={{ height: `${Math.max(4, evaluation.overall_score)}%` }}
-              />
+              <div className="flex min-h-0 w-full flex-1 items-end">
+                <div
+                  className={cn(
+                    "w-full rounded-t-sm transition-colors",
+                    selected ? "bg-accent" : "bg-[color:var(--border-strong)] group-hover:bg-accent",
+                  )}
+                  style={{ height: `${Math.max(4, evaluation.overall_score)}%` }}
+                />
+              </div>
               <span className="text-[10px] text-text-tertiary">T{index + 1}</span>
             </button>
           );

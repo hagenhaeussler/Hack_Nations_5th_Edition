@@ -164,6 +164,22 @@ const SCHEMA_SQL = `
     created_at                      timestamptz NOT NULL DEFAULT now()
   );
 
+  ALTER TABLE benchmark_evaluations
+    ADD COLUMN IF NOT EXISTS trial_id text;
+
+  WITH numbered AS (
+    SELECT id, row_number() OVER (ORDER BY created_at ASC, id ASC) AS rn
+      FROM benchmark_evaluations
+     WHERE trial_id IS NULL
+  )
+  UPDATE benchmark_evaluations
+     SET trial_id = 'trial_' || lpad(numbered.rn::text, 3, '0')
+    FROM numbered
+   WHERE benchmark_evaluations.id = numbered.id;
+
+  ALTER TABLE benchmark_evaluations
+    ALTER COLUMN trial_id SET NOT NULL;
+
   CREATE INDEX IF NOT EXISTS benchmark_evaluations_created_at_idx
     ON benchmark_evaluations (created_at ASC);
 

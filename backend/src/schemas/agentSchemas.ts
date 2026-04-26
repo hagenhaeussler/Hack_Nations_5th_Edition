@@ -2,11 +2,29 @@ import { z } from "zod";
 
 const stringArray = z.array(z.string()).default([]);
 const recordSchema = z.record(z.string(), z.unknown()).default({});
+const nullableString = z.string().nullable().default(null);
+
+export const HypothesisOntologySchema = z.object({
+  intervention: nullableString,
+  control: nullableString,
+  biological_system: nullableString,
+  endpoint: nullableString,
+  mechanism: nullableString,
+  success_threshold: nullableString,
+}).default({
+  intervention: null,
+  control: null,
+  biological_system: null,
+  endpoint: null,
+  mechanism: null,
+  success_threshold: null,
+});
 
 export const HypothesisExtractionSchema = z.object({
   title: z.string(),
   domain: z.string(),
   experiment_type: z.string(),
+  scientific_ontology: HypothesisOntologySchema,
   independent_variables: stringArray,
   dependent_variables: stringArray,
   methods: stringArray,

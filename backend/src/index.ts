@@ -9,6 +9,7 @@ import express, {
 import { env } from "./env.js";
 import { getMissingServiceMessage } from "./lib/config.js";
 import { ensureSchema, getPool } from "./lib/db.js";
+import { seedDemoBenchmarkData } from "./lib/demoBenchmarkSeed.js";
 import benchmarkRouter from "./routes/benchmark.js";
 import chatRouter from "./routes/chat.js";
 import creatorAgentRouter from "./routes/creatorAgent.js";
@@ -60,6 +61,12 @@ export async function bootstrap(): Promise<void> {
     }
   } else {
     console.warn(`[labpilot] ${getMissingServiceMessage("database")}`);
+  }
+
+  try {
+    await seedDemoBenchmarkData();
+  } catch (err) {
+    console.error("[labpilot] failed to seed demo benchmark data", err);
   }
 
   app.listen(env.port, () => {

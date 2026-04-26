@@ -52,6 +52,62 @@ const SUPPLIERS: SupplierDirectoryEntry[] = [
     resource_url: "https://www.idtdna.com/pages/tools",
     focus: "Primer design, qPCR tools, and oligo resources",
   },
+  {
+    supplier_id: "atcc",
+    name: "ATCC",
+    homepage_url: "https://www.atcc.org",
+    resource_url: "https://www.atcc.org/resources",
+    focus: "Cell lines, biological materials, culture guides, and authentication resources",
+  },
+  {
+    supplier_id: "addgene",
+    name: "Addgene",
+    homepage_url: "https://www.addgene.org",
+    resource_url: "https://www.addgene.org/protocols",
+    focus: "Plasmids, viral vectors, protocol references, and repository materials",
+  },
+  {
+    supplier_id: "protocols_io",
+    name: "protocols.io",
+    homepage_url: "https://www.protocols.io",
+    resource_url: "https://www.protocols.io/protocols",
+    focus: "Community protocol workflows and reproducible method references",
+  },
+  {
+    supplier_id: "bio_protocol",
+    name: "Bio-protocol",
+    homepage_url: "https://bio-protocol.org",
+    resource_url: "https://bio-protocol.org/en/protocol",
+    focus: "Peer-reviewed life-science protocol references",
+  },
+  {
+    supplier_id: "nature_protocols",
+    name: "Nature Protocols",
+    homepage_url: "https://www.nature.com",
+    resource_url: "https://www.nature.com/nprot",
+    focus: "Protocol-style method articles and experimental procedure grounding",
+  },
+  {
+    supplier_id: "jove",
+    name: "JoVE",
+    homepage_url: "https://www.jove.com",
+    resource_url: "https://www.jove.com/methods-collections",
+    focus: "Video protocol methods and procedural grounding",
+  },
+  {
+    supplier_id: "openwetware",
+    name: "OpenWetWare",
+    homepage_url: "https://openwetware.org",
+    resource_url: "https://openwetware.org/wiki/Protocols",
+    focus: "Open community lab protocols and wet-lab method notes",
+  },
+  {
+    supplier_id: "miqe_guidelines",
+    name: "MIQE Guidelines",
+    homepage_url: "https://www.gene-quantification.de",
+    resource_url: "https://www.gene-quantification.de/miqe.html",
+    focus: "qPCR reporting standards and validation expectations",
+  },
 ];
 
 const SUPPLIER_DOMAINS = [
@@ -60,6 +116,14 @@ const SUPPLIER_DOMAINS = [
   "promega.com",
   "qiagen.com",
   "idtdna.com",
+  "atcc.org",
+  "addgene.org",
+  "protocols.io",
+  "bio-protocol.org",
+  "nature.com",
+  "jove.com",
+  "openwetware.org",
+  "gene-quantification.de",
 ];
 
 const reportCache = new Map<string, ProcurementReport>();

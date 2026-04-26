@@ -303,6 +303,8 @@ function workToSource(work: OpenAlexWork, rank: number): ResearchSource | null {
     external_id: openAlexId,
     metadata: {
       provider: "OpenAlex",
+      source_kind: "scientific_literature",
+      retrieval_role: "semantic_novelty_qc",
       venue,
       doi: work.doi ?? null,
       openalex_url: work.id ?? null,

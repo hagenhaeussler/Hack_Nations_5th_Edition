@@ -96,7 +96,15 @@ export async function searchExternalResearch(args: {
       throw new Error("Research API returned invalid normalized sources.");
     }
     return {
-      sources: parsed.data.map((source: ResearchSource) => ({ ...source, is_fallback: false })),
+      sources: parsed.data.map((source: ResearchSource) => ({
+        ...source,
+        metadata: {
+          source_kind: "external_research_or_protocol",
+          retrieval_role: "protocol_grounding_or_novelty_qc",
+          ...source.metadata,
+        },
+        is_fallback: false,
+      })),
       warnings,
       mode: "external",
     };

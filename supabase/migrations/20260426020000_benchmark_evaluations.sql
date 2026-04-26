@@ -17,6 +17,7 @@ end $$;
 
 create table if not exists benchmark_evaluations (
   id uuid primary key default gen_random_uuid(),
+  trial_id text,
   project_id uuid references projects(id) on delete set null,
   -- LabPilot's current plan ids are app-level strings (for example plan_<uuid>).
   -- Keep this text so benchmark storage works with existing calendar plans.
@@ -41,6 +42,19 @@ create table if not exists benchmark_evaluations (
   metadata jsonb default '{}',
   created_at timestamptz default now()
 );
+
+with numbered as (
+  select id, row_number() over (order by created_at asc, id asc) as rn
+    from benchmark_evaluations
+   where trial_id is null
+)
+update benchmark_evaluations
+   set trial_id = 'trial_' || lpad(numbered.rn::text, 3, '0')
+  from numbered
+ where benchmark_evaluations.id = numbered.id;
+
+alter table benchmark_evaluations
+  alter column trial_id set not null;
 
 create index if not exists benchmark_evaluations_created_at_idx
   on benchmark_evaluations (created_at asc);

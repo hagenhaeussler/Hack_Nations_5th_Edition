@@ -242,6 +242,14 @@ export type SupplierId =
   | "promega"
   | "qiagen"
   | "idt"
+  | "atcc"
+  | "addgene"
+  | "protocols_io"
+  | "bio_protocol"
+  | "nature_protocols"
+  | "jove"
+  | "openwetware"
+  | "miqe_guidelines"
   | "market_estimate";
 
 export interface SupplierDirectoryEntry {
