@@ -1,4 +1,4 @@
-import { CalendarRange, GitBranch, ListChecks, MessageCircle, ShieldAlert, Sparkles } from "lucide-react";
+import { CalendarRange, ExternalLink, MessageCircle, ShieldAlert, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
@@ -21,11 +21,10 @@ import {
   getProject,
   type PlanQASuggestedAction,
 } from "@/lib/api";
-import type { Paper } from "@/lib/papers";
+import { buildPaperRelevanceExplanation, similarityLabel, type Paper } from "@/lib/papers";
 import {
   STATUS_LABEL,
   type PlanEditRequest,
-  type PrePlan,
   type Project,
   type Workflow,
   formatRelativeTime,
@@ -33,6 +32,7 @@ import {
 import { cn } from "@/lib/utils";
 
 type ProjectPageSlug = "calendar" | "statistics" | "literature";
+type LiteratureViewMode = "graph" | "papers";
 
 function isProjectPageSlug(value: string | undefined): value is ProjectPageSlug {
   return value === "calendar" || value === "statistics" || value === "literature";
@@ -210,6 +210,7 @@ function ProjectWorkspaceView({
   const [learningNotice, setLearningNotice] = useState<string | null>(null);
   const [qaOpen, setQaOpen] = useState(false);
   const [riskOpen, setRiskOpen] = useState(false);
+  const [literatureViewMode, setLiteratureViewMode] = useState<LiteratureViewMode>("papers");
   const [qaMessagesByPlan, setQaMessagesByPlan] = useState<Record<string, PlanQAMessage[]>>({});
   const planId = project.finalPlan?.plan_id ?? null;
   const qaMessages = planId ? (qaMessagesByPlan[planId] ?? []) : [];
@@ -227,6 +228,7 @@ function ProjectWorkspaceView({
   );
 
   const hasCalendar = (workflow?.nodes ?? []).length > 0;
+  const showsLiteratureWorkspace = page === "literature" || (page === "calendar" && !workflow);
 
   useEffect(() => {
     if (page !== "calendar") setSelectedNodeId(null);
@@ -345,7 +347,14 @@ function ProjectWorkspaceView({
       <ProjectHeader
         project={project}
         right={
-          workflow ? null : <BuildTimelineButton onGenerate={onGenerate} />
+          showsLiteratureWorkspace ? (
+            <ViewModeToggle
+              viewMode={literatureViewMode}
+              onToggle={() =>
+                setLiteratureViewMode((mode) => (mode === "papers" ? "graph" : "papers"))
+              }
+            />
+          ) : undefined
         }
       />
 
@@ -424,7 +433,11 @@ function ProjectWorkspaceView({
           )}
         </section>
       ) : page === "calendar" ? (
-        <ResearchGraphPage project={project} onGenerate={onGenerate} />
+        <ResearchGraphPage
+          project={project}
+          viewMode={literatureViewMode}
+          onGenerate={onGenerate}
+        />
       ) : page === "statistics" ? (
         workflow ? (
           <StatisticsView
@@ -438,7 +451,7 @@ function ProjectWorkspaceView({
           <GeneratePlaceholder onGenerate={onGenerate} />
         )
       ) : (
-        <LiteratureTab papers={project.papers ?? []} />
+        <LiteratureTab project={project} viewMode={literatureViewMode} />
       )}
 
       {page === "calendar" && selectedNode && !qaOpen ? (
@@ -463,149 +476,271 @@ function ProjectWorkspaceView({
 
 function ResearchGraphPage({
   project,
+  viewMode,
   onGenerate,
 }: {
   project: Project;
+  viewMode: LiteratureViewMode;
   onGenerate: () => void;
 }) {
-  const papers = project.papers ?? [];
+  const papers = useMemo(
+    () => [...(project.papers ?? [])].sort((left, right) => right.similarity - left.similarity),
+    [project.papers],
+  );
+  const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
   const topSimilarity = papers[0]?.similarity ?? 0;
 
   return (
-    <section className="mx-auto flex w-full max-w-[1080px] flex-1 flex-col gap-5 overflow-y-auto px-8 py-8">
-      <header>
-        <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
-          Related work map
-        </p>
-        <h2 className="mt-1 font-sans text-[22px] font-medium tracking-[-0.01em] text-text-primary">
-          {papers.length} papers with similar experiments
-        </h2>
-        {papers.length > 0 ? (
-          <p className="mt-1 text-[12.5px] text-text-secondary">
-            Top match: {Math.round(topSimilarity * 100)}% similarity
-          </p>
-        ) : null}
-      </header>
+    <ResearchLiteratureView
+      hypothesis={project.hypothesis}
+      papers={papers}
+      viewMode={viewMode}
+      selectedPaperId={selectedPaperId}
+      topSimilarity={topSimilarity}
+      onSelectPaper={(paper) =>
+        setSelectedPaperId((current) => (current === paper.id ? null : paper.id))
+      }
+      action={<BuildTimelineButton onGenerate={onGenerate} large />}
+    />
+  );
+}
 
-      {project.prePlan ? <PrePlanCard prePlan={project.prePlan} /> : null}
+function ResearchLiteratureView({
+  hypothesis,
+  papers,
+  viewMode,
+  selectedPaperId,
+  topSimilarity,
+  onSelectPaper,
+  action,
+}: {
+  hypothesis: string;
+  papers: Paper[];
+  viewMode: LiteratureViewMode;
+  selectedPaperId: string | null;
+  topSimilarity: number;
+  onSelectPaper: (paper: Paper) => void;
+  action?: React.ReactNode;
+}) {
+  const [detailPaper, setDetailPaper] = useState<Paper | null>(null);
 
-      <div className="rounded-md border border-[color:var(--border-default)] bg-bg-surface p-5 shadow-sm">
-        {papers.length === 0 ? (
-          <p className="py-12 text-center text-[13px] text-text-tertiary">
+  const openPaperDetails = (paper: Paper) => {
+    if (selectedPaperId !== paper.id) onSelectPaper(paper);
+    setDetailPaper(paper);
+  };
+
+  if (papers.length === 0) {
+    return (
+      <section className="flex flex-1 items-center justify-center px-8 py-24 text-center">
+        <div className="flex max-w-[44ch] flex-col items-center gap-3">
+          <p className="text-[13px] leading-[1.55] text-text-tertiary">
             No related papers were returned. You can still build the calendar
             from your hypothesis.
           </p>
-        ) : (
-          <div className="h-[420px]">
-            <PaperGraph prompt={project.hypothesis} papers={papers} />
-          </div>
-        )}
-      </div>
-
-      <div className="flex justify-end">
-        <BuildTimelineButton onGenerate={onGenerate} />
-      </div>
-    </section>
-  );
-}
-
-function PrePlanCard({ prePlan }: { prePlan: PrePlan }) {
-  const nodes = prePlan.dag.nodes;
-  const resourcePreview = [
-    ...prePlan.global_resources.equipment.slice(0, 3),
-    ...prePlan.global_resources.materials.slice(0, 3),
-  ].slice(0, 5);
+          {action}
+        </div>
+      </section>
+    );
+  }
 
   return (
-    <section className="rounded-md border border-[color:var(--border-default)] bg-bg-surface p-4 shadow-sm">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <GitBranch size={14} strokeWidth={1.5} className="text-text-tertiary" />
-            <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
-              Procedure task template
-            </p>
-            <ConfidenceBadge
-              confidence={prePlan.experiment_summary.reconstruction_confidence}
+    <section className="relative grid min-h-0 flex-1 grid-cols-1 overflow-hidden bg-bg-primary">
+      {viewMode === "graph" ? (
+        <div className="flex min-h-0 flex-col overflow-hidden p-4">
+          <div className="h-full min-h-0 rounded-md border border-[color:var(--border-default)] bg-bg-surface p-4 shadow-sm">
+            <PaperGraph
+              papers={papers}
+              selectedPaperId={selectedPaperId}
+              onSelect={openPaperDetails}
             />
           </div>
-          <h3 className="mt-1 font-sans text-[17px] font-medium tracking-[-0.01em] text-text-primary">
-            {prePlan.experiment_summary.title}
-          </h3>
-          <p className="mt-1 max-w-[78ch] text-[13px] leading-[1.55] text-text-secondary">
-            {prePlan.summary}
+        </div>
+      ) : null}
+
+      {viewMode === "papers" ? (
+      <aside className="flex min-h-0 flex-col overflow-hidden">
+        <div className="min-h-0 flex-1 overflow-y-auto p-6">
+          <header className="mb-3 flex items-end justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
+                Fetched papers
+              </p>
+              <h3 className="mt-1 font-sans text-[18px] font-medium text-text-primary">
+                Relevance ranked
+              </h3>
+            </div>
+            <span className="text-[12px] text-text-tertiary">
+              {papers.length} result{papers.length === 1 ? "" : "s"}
+            </span>
+          </header>
+          <p className="mb-4 text-[12.5px] text-text-secondary">
+            Ordered by semantic relevance. Top match: {Math.round(topSimilarity * 100)}%.
           </p>
+          <PaperList
+            hypothesis={hypothesis}
+            papers={papers}
+            selectedPaperId={selectedPaperId}
+            onSelect={onSelectPaper}
+            onOpenDetails={openPaperDetails}
+          />
         </div>
+      </aside>
+      ) : null}
 
-        <dl className="grid shrink-0 grid-cols-3 gap-2 text-center">
-          <Metric label="Steps" value={String(nodes.length)} />
-          <Metric label="Templates" value={String(nodes.length)} />
-          <Metric label="Sources" value={String(prePlan.source_documents.length)} />
-        </dl>
-      </div>
+      {detailPaper ? (
+        <PaperDetailDrawer
+          paper={detailPaper}
+          hypothesis={hypothesis}
+          onClose={() => setDetailPaper(null)}
+        />
+      ) : null}
 
-      <div className="mt-4 grid gap-3 lg:grid-cols-[1.4fr_1fr]">
-        <div className="rounded-md border border-[color:var(--border-default)] bg-bg-primary p-3">
-          <div className="mb-2 flex items-center gap-2">
-            <ListChecks size={14} strokeWidth={1.5} className="text-text-tertiary" />
-            <h4 className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
-              Reconstructed steps
-            </h4>
+      {action ? (
+        <div className="pointer-events-none absolute bottom-6 left-1/2 z-20 -translate-x-1/2">
+          <div className="pointer-events-auto rounded-full bg-bg-surface/95 p-2 shadow-lg ring-1 ring-[color:var(--border-default)] backdrop-blur">
+            {action}
           </div>
-          <ol className="flex flex-col gap-2">
-            {nodes.slice(0, 5).map((node) => (
-              <li key={node.node_id} className="text-[13px] leading-[1.5]">
-                <span className="font-medium text-text-primary">
-                  {node.step_name}
-                </span>
-                <span className="text-text-secondary"> · {node.step_purpose}</span>
-              </li>
-            ))}
-          </ol>
         </div>
-
-        <div className="rounded-md border border-[color:var(--border-default)] bg-bg-primary p-3">
-          <h4 className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
-            Resources and gaps
-          </h4>
-          {resourcePreview.length > 0 ? (
-            <p className="mt-2 text-[13px] leading-[1.55] text-text-secondary">
-              {resourcePreview.join(", ")}
-            </p>
-          ) : (
-            <p className="mt-2 text-[13px] text-text-tertiary">
-              No concrete resources were extracted.
-            </p>
-          )}
-          {prePlan.open_questions.length > 0 ? (
-            <p className="mt-3 line-clamp-3 text-[12.5px] leading-[1.55] text-text-tertiary">
-              Open question: {prePlan.open_questions[0]}
-            </p>
-          ) : null}
-        </div>
-      </div>
+      ) : null}
     </section>
   );
 }
 
-function ConfidenceBadge({ confidence }: { confidence: PrePlan["experiment_summary"]["reconstruction_confidence"] }) {
+function ViewModeToggle({
+  viewMode,
+  onToggle,
+}: {
+  viewMode: LiteratureViewMode;
+  onToggle: () => void;
+}) {
+  const nextLabel = viewMode === "papers" ? "Switch to citation graph" : "Switch to paper list";
   return (
-    <span className="rounded-full bg-bg-hover px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.05em] text-text-secondary">
-      {confidence} confidence
-    </span>
+    <button
+      type="button"
+      onClick={onToggle}
+      className="inline-flex items-center rounded-full border border-[color:var(--border-default)] bg-bg-surface px-4 py-2 text-[12px] font-medium text-text-primary shadow-sm hover:bg-bg-hover"
+      aria-label={nextLabel}
+    >
+      {nextLabel}
+    </button>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function PaperDetailDrawer({
+  paper,
+  hypothesis,
+  onClose,
+}: {
+  paper: Paper;
+  hypothesis: string;
+  onClose: () => void;
+}) {
+  const [showPdfPreview, setShowPdfPreview] = useState(false);
+  const graphLinkCount =
+    (paper.referencedPaperIds?.length ?? 0) + (paper.relatedPaperIds?.length ?? 0);
+  const relevanceExplanation = buildPaperRelevanceExplanation(paper, hypothesis);
+
   return (
-    <div className="min-w-16 rounded-sm border border-[color:var(--border-default)] bg-bg-primary px-2 py-1.5">
-      <dt className="text-[10px] uppercase tracking-[0.06em] text-text-tertiary">
-        {label}
-      </dt>
-      <dd className="mt-0.5 text-[15px] font-medium text-text-primary">
-        {value}
-      </dd>
-    </div>
+    <aside className="absolute inset-y-0 right-0 z-30 flex w-full max-w-[440px] flex-col border-l border-[color:var(--border-default)] bg-bg-primary shadow-2xl">
+      <header className="flex items-start justify-between gap-4 border-b border-[color:var(--border-default)] px-5 py-4">
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
+            Paper details
+          </p>
+          <h3 className="mt-1 line-clamp-3 font-sans text-[18px] font-medium leading-[1.25] text-text-primary">
+            {paper.title}
+          </h3>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-full p-1.5 text-text-tertiary hover:bg-bg-hover hover:text-text-primary"
+          aria-label="Close paper details"
+        >
+          <X size={17} strokeWidth={1.75} />
+        </button>
+      </header>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className="flex flex-wrap gap-2">
+          <span className="rounded-full bg-accent-subtle px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.04em] text-accent">
+            {Math.round(paper.similarity * 100)}% relevance
+          </span>
+          <span className="rounded-full bg-bg-hover px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.04em] text-text-secondary">
+            {similarityLabel(paper.similarity)}
+          </span>
+          {graphLinkCount > 0 ? (
+            <span className="rounded-full bg-bg-hover px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.04em] text-text-secondary">
+              {graphLinkCount} graph link{graphLinkCount === 1 ? "" : "s"}
+            </span>
+          ) : null}
+        </div>
+
+        <section className="mt-4 rounded-md border border-[color:var(--border-default)] bg-bg-surface p-3">
+          <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
+            Why it matters for this hypothesis
+          </p>
+          <p className="mt-1 text-[13px] leading-[1.6] text-text-secondary">
+            {relevanceExplanation}
+          </p>
+          {paper.novelty_relation ? (
+            <p className="mt-2 text-[13px] leading-[1.6] text-text-secondary">
+              {paper.novelty_relation}
+            </p>
+          ) : null}
+        </section>
+
+        <section className="mt-4">
+          <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
+            Source
+          </p>
+          <p className="mt-1 text-[13px] leading-[1.55] text-text-secondary">
+            {paper.authors.join(", ")} · {paper.venue} · {paper.year}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-3">
+            {paper.url ? (
+              <a
+                href={paper.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-[12px] font-medium text-accent hover:text-accent-hover"
+              >
+                Open source page
+                <ExternalLink size={12} strokeWidth={1.5} />
+              </a>
+            ) : null}
+            {paper.pdfUrl ? (
+              <button
+                type="button"
+                onClick={() => setShowPdfPreview((current) => !current)}
+                className="inline-flex items-center gap-1 text-[12px] font-medium text-accent hover:text-accent-hover"
+              >
+                {showPdfPreview ? "Hide PDF preview" : "Preview PDF"}
+              </button>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="mt-4">
+          <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
+            Abstract
+          </p>
+          <p className="mt-1 text-[13px] leading-[1.65] text-text-secondary">
+            {paper.abstract}
+          </p>
+        </section>
+
+        {paper.pdfUrl && showPdfPreview ? (
+          <section className="mt-4 overflow-hidden rounded-md border border-[color:var(--border-default)] bg-bg-surface">
+            <iframe
+              title={`PDF preview for ${paper.title}`}
+              src={paper.pdfUrl}
+              className="h-[420px] w-full"
+            />
+          </section>
+        ) : null}
+      </div>
+    </aside>
   );
 }
 
@@ -626,7 +761,18 @@ function GeneratePlaceholder({ onGenerate }: { onGenerate: () => void }) {
   );
 }
 
-function LiteratureTab({ papers }: { papers: Paper[] }) {
+function LiteratureTab({
+  project,
+  viewMode,
+}: {
+  project: Project;
+  viewMode: LiteratureViewMode;
+}) {
+  const papers = useMemo(
+    () => [...(project.papers ?? [])].sort((left, right) => right.similarity - left.similarity),
+    [project.papers],
+  );
+  const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
   if (papers.length === 0) {
     return (
       <section className="flex flex-1 items-center justify-center px-8 py-24 text-center">
@@ -637,17 +783,16 @@ function LiteratureTab({ papers }: { papers: Paper[] }) {
     );
   }
   return (
-    <section className="mx-auto w-full max-w-[1080px] flex-1 overflow-y-auto px-8 py-8">
-      <header className="mb-4">
-        <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
-          Literature
-        </p>
-        <h2 className="mt-1 font-sans text-[22px] font-medium tracking-[-0.01em] text-text-primary">
-          {papers.length} related papers
-        </h2>
-      </header>
-      <PaperList papers={papers} />
-    </section>
+    <ResearchLiteratureView
+      hypothesis={project.hypothesis}
+      papers={papers}
+      viewMode={viewMode}
+      selectedPaperId={selectedPaperId}
+      topSimilarity={papers[0]?.similarity ?? 0}
+      onSelectPaper={(paper) =>
+        setSelectedPaperId((current) => (current === paper.id ? null : paper.id))
+      }
+    />
   );
 }
 
@@ -658,8 +803,9 @@ function SetupWarningBanner({
   warnings?: string[];
   mode?: Project["generation_mode"];
 }) {
+  const [dismissed, setDismissed] = useState(false);
   const visibleWarnings = (warnings ?? []).filter(Boolean).slice(0, 2);
-  if (visibleWarnings.length === 0) return null;
+  if (dismissed || visibleWarnings.length === 0) return null;
   const label =
     mode === "openai"
       ? "Connected mode"
@@ -667,9 +813,19 @@ function SetupWarningBanner({
         ? "Partial mode"
         : "Demo mode";
   return (
-    <div className="border-b border-[color:var(--border-default)] bg-accent-subtle px-8 py-2 text-[12px] leading-[1.45] text-text-secondary">
-      <span className="font-medium text-text-primary">{label}:</span>{" "}
-      {visibleWarnings.join(" ")}
+    <div className="flex items-start justify-between gap-4 border-b border-[color:var(--border-default)] bg-accent-subtle px-8 py-2 text-[12px] leading-[1.45] text-text-secondary">
+      <p>
+        <span className="font-medium text-text-primary">{label}:</span>{" "}
+        {visibleWarnings.join(" ")}
+      </p>
+      <button
+        type="button"
+        onClick={() => setDismissed(true)}
+        className="shrink-0 rounded-full p-0.5 text-text-tertiary hover:bg-bg-hover hover:text-text-primary"
+        aria-label="Dismiss setup warning"
+      >
+        <X size={14} strokeWidth={1.75} />
+      </button>
     </div>
   );
 }
@@ -693,7 +849,7 @@ function ProjectHeader({ project, right }: ProjectHeaderProps) {
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <h1 className="font-sans text-[22px] font-medium tracking-[-0.01em] text-text-primary">
+          <h1 className="line-clamp-1 max-w-[760px] font-sans text-[22px] font-medium tracking-[-0.01em] text-text-primary">
             {project.title}
           </h1>
           <span
@@ -710,14 +866,11 @@ function ProjectHeader({ project, right }: ProjectHeaderProps) {
             · {formatRelativeTime(project.updatedAt)}
           </span>
         </div>
-        <p className="mt-1.5 line-clamp-2 max-w-[640px] text-[13px] leading-[1.55] text-text-primary">
-          <Sparkles
-            size={12}
-            strokeWidth={1.5}
-            className="mr-1 inline align-baseline text-text-tertiary"
-          />
-          {project.hypothesis}
-        </p>
+        {project.description ? (
+          <p className="mt-1 line-clamp-1 max-w-[760px] text-[12.5px] leading-[1.4] text-text-secondary">
+            {project.description}
+          </p>
+        ) : null}
       </div>
 
       {right ? <div className="shrink-0">{right}</div> : null}
@@ -725,17 +878,20 @@ function ProjectHeader({ project, right }: ProjectHeaderProps) {
   );
 }
 
-function BuildTimelineButton({ onGenerate }: { onGenerate: () => void }) {
+function BuildTimelineButton({ onGenerate, large = false }: { onGenerate: () => void; large?: boolean }) {
   return (
     <button
       type="button"
       onClick={onGenerate}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-sm bg-accent px-3.5 py-1.5 text-[13px] font-medium text-white",
+        "inline-flex items-center gap-1.5 bg-accent font-medium text-white shadow-sm",
         "transition-colors duration-[var(--duration-fast)] hover:bg-accent-hover",
+        large
+          ? "rounded-full px-6 py-3 text-[15px]"
+          : "rounded-sm px-3.5 py-1.5 text-[13px]",
       )}
     >
-      <CalendarRange size={14} strokeWidth={1.75} />
+      <CalendarRange size={large ? 18 : 14} strokeWidth={1.75} />
       Build experiment calendar
     </button>
   );

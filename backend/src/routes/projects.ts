@@ -6,6 +6,7 @@ import { runCreatorPlanAgents, runResearchAgents } from "../agents/agentOrchestr
 import { getSetupWarnings } from "../lib/config.js";
 import { FeedbackLearningError, FeedbackLearningService } from "../lib/feedbackLearningService.js";
 import { getLearningRepo } from "../lib/learningRepo.js";
+import { callTextModel } from "../lib/openaiClient.js";
 import {
   generatePrePlan,
   type PrePlanInputDocument,
@@ -88,6 +89,82 @@ function titleFromHypothesis(hypothesis: string): string {
   const cut = cleaned.slice(0, 64);
   const lastSpace = cut.lastIndexOf(" ");
   return `${(lastSpace > 32 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
+}
+
+function cleanGeneratedTitle(value: string, fallback: string): string {
+  const cleaned = value
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return fallback;
+  const withoutPunctuation = cleaned.replace(/[.!?]+$/g, "");
+  if (withoutPunctuation.length <= 68) return withoutPunctuation;
+  const cut = withoutPunctuation.slice(0, 68);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${(lastSpace > 28 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
+}
+
+function descriptionFromHypothesis(hypothesis: string): string {
+  const cleaned = hypothesis.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= 140) return cleaned;
+  const cut = cleaned.slice(0, 140);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${(lastSpace > 80 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
+}
+
+function parseProjectMetadata(
+  value: string,
+  fallback: { title: string; description: string },
+): { title: string; description: string } {
+  const lines = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const titleLine = lines.find((line) => /^title\s*:/i.test(line));
+  const descriptionLine = lines.find((line) => /^description\s*:/i.test(line));
+  const rawTitle = titleLine?.replace(/^title\s*:/i, "").trim() ?? lines[0] ?? "";
+  const rawDescription =
+    descriptionLine?.replace(/^description\s*:/i, "").trim() ??
+    lines.find((line) => line !== rawTitle) ??
+    "";
+  return {
+    title: cleanGeneratedTitle(rawTitle, fallback.title),
+    description: rawDescription
+      ? descriptionFromHypothesis(rawDescription)
+      : fallback.description,
+  };
+}
+
+async function projectMetadataWithSmallModel(hypothesis: string): Promise<{ title: string; description: string }> {
+  const fallback = {
+    title: titleFromHypothesis(hypothesis),
+    description: descriptionFromHypothesis(hypothesis),
+  };
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      callTextModel({
+        taskName: "project_metadata",
+        modelTier: "small",
+        instructions:
+          "Write concise project metadata for a research planning app. Return exactly two lines: 'Title: <under 8 words>' and 'Description: <one short sentence under 140 characters>'. Do not include markdown.",
+        input: { hypothesis },
+        maxTokens: 90,
+      }),
+      new Promise<null>((resolve) => {
+        timeout = setTimeout(() => resolve(null), 1800);
+      }),
+    ]);
+    if (!result || !result.ok) return fallback;
+    return parseProjectMetadata(result.text, fallback);
+  } catch (err) {
+    logger.warn("project_metadata.generation_failed", {
+      message: err instanceof Error ? err.message : "Project metadata generation failed.",
+    });
+    return fallback;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -243,9 +320,11 @@ router.post("/research", upload.array("files", 10), async (req: Request, res: Re
       hypothesisLength: hypothesis.length,
       attachmentCount: Array.isArray(req.files) ? req.files.length : 0,
     });
+    const metadata = await projectMetadataWithSmallModel(hypothesis);
     const project = await repo.create({
       hypothesis,
-      title: titleFromHypothesis(hypothesis),
+      title: metadata.title,
+      description: metadata.description,
     });
     projectId = project.id;
 

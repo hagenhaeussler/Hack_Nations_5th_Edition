@@ -25,6 +25,7 @@ export interface Paper {
   similarity: number;
   abstract: string;
   url?: string;
+  pdfUrl?: string;
   provider?: string;
   novelty_relation?: string;
   is_fallback?: boolean;
@@ -681,6 +682,8 @@ export interface Project {
   hypothesis: string;
   /** Short, human-friendly title derived from the hypothesis. */
   title: string;
+  /** Short AI-generated summary; the raw prompt remains in `hypothesis`. */
+  description: string;
   status: ProjectStatus;
   createdAt: string;
   updatedAt: string;

@@ -342,6 +342,7 @@ test("current edited workflow data is used instead of stale final plan data", ()
     id: "project_123",
     hypothesis: stalePlan.hypothesis,
     title: stalePlan.experiment_title,
+    description: stalePlan.hypothesis,
     status: "ready",
     createdAt: stalePlan.created_at,
     updatedAt: stalePlan.updated_at,

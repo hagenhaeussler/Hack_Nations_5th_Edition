@@ -282,6 +282,7 @@ function sampleProject(): Project {
     id: "project_123",
     hypothesis: "Test fluorescence response.",
     title: "Fluorescence response test",
+    description: "Test fluorescence response.",
     status: "ready",
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",

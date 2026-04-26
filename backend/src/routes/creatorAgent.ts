@@ -73,6 +73,7 @@ router.post("/run", async (req: Request, res: Response) => {
     id: "raw_creator_agent_input",
     hypothesis,
     title: hypothesis.slice(0, 72),
+    description: hypothesis.slice(0, 140),
     status: "generating",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

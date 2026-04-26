@@ -516,6 +516,7 @@ export interface Project {
   id: string;
   hypothesis: string;
   title: string;
+  description: string;
   status: ProjectStatus;
   createdAt: string;
   updatedAt: string;

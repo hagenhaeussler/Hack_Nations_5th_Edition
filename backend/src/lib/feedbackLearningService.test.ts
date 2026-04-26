@@ -124,6 +124,7 @@ function sampleProject(): Project {
     id: "project_001",
     hypothesis: "Test fluorescence-based cell growth in culture.",
     title: "Cell growth assay",
+    description: "Test fluorescence-based cell growth in culture.",
     status: "ready",
     createdAt: "2026-04-25T00:00:00.000Z",
     updatedAt: "2026-04-25T00:00:00.000Z",

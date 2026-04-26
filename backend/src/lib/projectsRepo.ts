@@ -24,7 +24,7 @@ import type {
  * (most-recently-updated first on `list`).
  */
 export interface ProjectsRepo {
-  create(input: { hypothesis: string; title: string }): Promise<Project>;
+  create(input: { hypothesis: string; title: string; description: string }): Promise<Project>;
   attachPapers(id: string, papers: Paper[]): Promise<Project | null>;
   attachResearchResults(
     id: string,
@@ -54,15 +54,17 @@ export interface ProjectsRepo {
 class MemoryProjectsRepo implements ProjectsRepo {
   private readonly store = new Map<string, Project>();
 
-  async create({ hypothesis, title }: {
+  async create({ hypothesis, title, description }: {
     hypothesis: string;
     title: string;
+    description: string;
   }): Promise<Project> {
     const now = new Date().toISOString();
     const project: Project = {
       id: randomUUID(),
       hypothesis,
       title,
+      description,
       status: "researching",
       createdAt: now,
       updatedAt: now,
@@ -186,6 +188,7 @@ interface ProjectRow {
   id: string;
   hypothesis: string;
   title: string;
+  description: string;
   status: ProjectStatus;
   papers: Paper[] | null;
   pre_plan: PrePlan | null;
@@ -202,6 +205,7 @@ function rowToProject(row: ProjectRow): Project {
     id: row.id,
     hypothesis: row.hypothesis,
     title: row.title,
+    description: row.description,
     status: row.status,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
@@ -216,19 +220,20 @@ function rowToProject(row: ProjectRow): Project {
 }
 
 class PostgresProjectsRepo implements ProjectsRepo {
-  async create({ hypothesis, title }: {
+  async create({ hypothesis, title, description }: {
     hypothesis: string;
     title: string;
+    description: string;
   }): Promise<Project> {
     const pool = getPool();
     if (!pool) throw new Error("PostgresProjectsRepo used without a pool");
     const id = randomUUID();
     const result = await pool.query<ProjectRow>(
-      `INSERT INTO projects (id, hypothesis, title, status)
-       VALUES ($1, $2, $3, 'researching')
-       RETURNING id, hypothesis, title, status, papers, pre_plan, final_plan, workflow,
+      `INSERT INTO projects (id, hypothesis, title, description, status)
+       VALUES ($1, $2, $3, $4, 'researching')
+       RETURNING id, hypothesis, title, description, status, papers, pre_plan, final_plan, workflow,
                  setup_warnings, generation_mode, created_at, updated_at`,
-      [id, hypothesis, title],
+      [id, hypothesis, title, description],
     );
     return rowToProject(result.rows[0]!);
   }
@@ -242,7 +247,7 @@ class PostgresProjectsRepo implements ProjectsRepo {
               status     = 'research-ready',
               updated_at = now()
         WHERE id = $1
-        RETURNING id, hypothesis, title, status, papers, pre_plan, final_plan, workflow,
+        RETURNING id, hypothesis, title, description, status, papers, pre_plan, final_plan, workflow,
                   setup_warnings, generation_mode, created_at, updated_at`,
       [id, JSON.stringify(papers)],
     );
@@ -267,7 +272,7 @@ class PostgresProjectsRepo implements ProjectsRepo {
               status     = 'research-ready',
               updated_at = now()
         WHERE id = $1
-        RETURNING id, hypothesis, title, status, papers, pre_plan, final_plan, workflow,
+        RETURNING id, hypothesis, title, description, status, papers, pre_plan, final_plan, workflow,
                   setup_warnings, generation_mode, created_at, updated_at`,
       [id, JSON.stringify(papers), JSON.stringify(prePlan), JSON.stringify(setupWarnings), generationMode],
     );
@@ -292,7 +297,7 @@ class PostgresProjectsRepo implements ProjectsRepo {
               status     = 'ready',
               updated_at = now()
         WHERE id = $1
-        RETURNING id, hypothesis, title, status, papers, pre_plan, final_plan, workflow,
+        RETURNING id, hypothesis, title, description, status, papers, pre_plan, final_plan, workflow,
                   setup_warnings, generation_mode, created_at, updated_at`,
       [id, JSON.stringify(finalPlan), JSON.stringify(workflow), JSON.stringify(setupWarnings), generationMode],
     );
@@ -311,7 +316,7 @@ class PostgresProjectsRepo implements ProjectsRepo {
               status     = 'ready',
               updated_at = now()
         WHERE id = $1
-        RETURNING id, hypothesis, title, status, papers, pre_plan, final_plan, workflow,
+        RETURNING id, hypothesis, title, description, status, papers, pre_plan, final_plan, workflow,
                   setup_warnings, generation_mode, created_at, updated_at`,
       [id, JSON.stringify(workflow)],
     );
@@ -329,7 +334,7 @@ class PostgresProjectsRepo implements ProjectsRepo {
           SET status     = $2,
               updated_at = now()
         WHERE id = $1
-        RETURNING id, hypothesis, title, status, papers, pre_plan, final_plan, workflow,
+        RETURNING id, hypothesis, title, description, status, papers, pre_plan, final_plan, workflow,
                   setup_warnings, generation_mode, created_at, updated_at`,
       [id, status],
     );
@@ -340,7 +345,7 @@ class PostgresProjectsRepo implements ProjectsRepo {
     const pool = getPool();
     if (!pool) throw new Error("PostgresProjectsRepo used without a pool");
     const result = await pool.query<ProjectRow>(
-      `SELECT id, hypothesis, title, status, papers, pre_plan, final_plan, workflow,
+      `SELECT id, hypothesis, title, description, status, papers, pre_plan, final_plan, workflow,
               setup_warnings, generation_mode, created_at, updated_at
          FROM projects
         WHERE id = $1`,
@@ -353,7 +358,7 @@ class PostgresProjectsRepo implements ProjectsRepo {
     const pool = getPool();
     if (!pool) throw new Error("PostgresProjectsRepo used without a pool");
     const result = await pool.query<ProjectRow>(
-      `SELECT id, hypothesis, title, status, papers, pre_plan, final_plan, workflow,
+      `SELECT id, hypothesis, title, description, status, papers, pre_plan, final_plan, workflow,
               setup_warnings, generation_mode, created_at, updated_at
          FROM projects
         WHERE final_plan->>'plan_id' = $1
@@ -367,7 +372,7 @@ class PostgresProjectsRepo implements ProjectsRepo {
     const pool = getPool();
     if (!pool) throw new Error("PostgresProjectsRepo used without a pool");
     const result = await pool.query<ProjectRow>(
-      `SELECT id, hypothesis, title, status, papers, pre_plan, final_plan, workflow,
+      `SELECT id, hypothesis, title, description, status, papers, pre_plan, final_plan, workflow,
               setup_warnings, generation_mode, created_at, updated_at
          FROM projects
         ORDER BY updated_at DESC`,

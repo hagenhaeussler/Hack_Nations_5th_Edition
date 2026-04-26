@@ -188,6 +188,10 @@ function workToSource(work: OpenAlexWork, rank: number): ResearchSource | null {
     work.best_oa_location?.pdf_url ??
     work.id ??
     null;
+  const pdfUrl =
+    work.best_oa_location?.pdf_url ??
+    work.primary_location?.pdf_url ??
+    null;
   const referencedOpenAlexIds = unique(
     (work.referenced_works ?? [])
       .map(normalizeOpenAlexWorkId)
@@ -211,6 +215,7 @@ function workToSource(work: OpenAlexWork, rank: number): ResearchSource | null {
       venue,
       doi: work.doi ?? null,
       openalex_url: work.id ?? null,
+      pdf_url: pdfUrl,
       type: work.type ?? null,
       cited_by_count: work.cited_by_count ?? 0,
       is_open_access: work.open_access?.is_oa ?? null,

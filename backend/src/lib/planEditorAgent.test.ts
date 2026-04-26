@@ -147,6 +147,7 @@ function project(): Project {
     id: "project_001",
     hypothesis: "Run an imaging experiment.",
     title: "Imaging experiment",
+    description: "Run an imaging experiment.",
     status: "ready",
     createdAt: "2026-04-25T00:00:00.000Z",
     updatedAt: "2026-04-25T00:00:00.000Z",

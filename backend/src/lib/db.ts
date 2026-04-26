@@ -34,6 +34,7 @@ const SCHEMA_SQL = `
     id           text        PRIMARY KEY,
     hypothesis   text        NOT NULL,
     title        text        NOT NULL,
+    description  text        NOT NULL DEFAULT '',
     status       text        NOT NULL,
     papers       jsonb,
     pre_plan     jsonb,
@@ -44,6 +45,9 @@ const SCHEMA_SQL = `
     created_at   timestamptz NOT NULL DEFAULT now(),
     updated_at   timestamptz NOT NULL DEFAULT now()
   );
+
+  ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS description text NOT NULL DEFAULT '';
 
   ALTER TABLE projects
     ADD COLUMN IF NOT EXISTS pre_plan jsonb;
