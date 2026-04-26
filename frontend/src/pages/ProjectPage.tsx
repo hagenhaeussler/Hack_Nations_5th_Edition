@@ -1,23 +1,30 @@
-import { CalendarRange, GitBranch, ListChecks, Sparkles } from "lucide-react";
-import type { Edge, Node } from "@xyflow/react";
+import { CalendarRange, GitBranch, ListChecks, MessageCircle, ShieldAlert, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { LoadingScreen } from "@/components/LoadingScreen";
+import { CalendarView } from "@/components/calendar/CalendarView";
 import { PaperGraph } from "@/components/PaperGraph";
 import { PaperList } from "@/components/PaperList";
+import { RiskAnalyzerModal } from "@/components/risk/RiskAnalyzerModal";
 import { StatisticsView } from "@/components/statistics/StatisticsView";
-import { TimelineGraph } from "@/components/timeline/TimelineGraph";
-import { WorkflowNodeDetailPanel } from "@/components/timeline/WorkflowNodeDetailPanel";
 import {
-  TIMELINE_DAY_WIDTH,
-  TIMELINE_TRACK_HEIGHT,
-  type WorkflowNodeData,
-} from "@/components/timeline/WorkflowNode";
-import { generateProject, getProject, updateWorkflowNode } from "@/lib/api";
+  PlanQASidebar,
+  type PlanQAMessage,
+} from "@/components/timeline/PlanQASidebar";
+import { WorkflowNodeDetailPanel } from "@/components/timeline/WorkflowNodeDetailPanel";
+import type { WorkflowNodeData } from "@/components/timeline/WorkflowNode";
+import {
+  applyPlanEdit,
+  applyPlanEdits,
+  generateProject,
+  getProject,
+  type PlanQASuggestedAction,
+} from "@/lib/api";
 import type { Paper } from "@/lib/papers";
 import {
   STATUS_LABEL,
+  type PlanEditRequest,
   type PrePlan,
   type Project,
   type Workflow,
@@ -25,55 +32,22 @@ import {
 } from "@/lib/projects";
 import { cn } from "@/lib/utils";
 
-type ProjectPageSlug = "graph" | "statistics" | "literature";
+type ProjectPageSlug = "calendar" | "statistics" | "literature";
 
 function isProjectPageSlug(value: string | undefined): value is ProjectPageSlug {
-  return value === "graph" || value === "statistics" || value === "literature";
+  return value === "calendar" || value === "statistics" || value === "literature";
 }
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
-function parseWorkflowDate(value: string | undefined): Date | null {
-  if (!value) return null;
-  const time = Date.parse(`${value}T00:00:00.000Z`);
-  return Number.isNaN(time) ? null : new Date(time);
-}
-
-function formatWorkflowDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
-function addWorkflowDays(date: Date, days: number): Date {
-  const next = new Date(date);
-  next.setUTCDate(next.getUTCDate() + days);
-  return next;
-}
-
-function getWorkflowBaseDate(workflow: Workflow | undefined): Date {
-  const dates =
-    workflow?.nodes
-      .map((node) => parseWorkflowDate(node.data.startDate))
-      .filter((date): date is Date => Boolean(date)) ?? [];
-  if (dates.length === 0) return new Date();
-  return new Date(Math.min(...dates.map((date) => date.getTime())));
-}
-
-function getDayOffset(baseDate: Date, startDate: string | undefined): number {
-  const date = parseWorkflowDate(startDate);
-  if (!date) return 0;
-  return Math.max(0, Math.round((date.getTime() - baseDate.getTime()) / MS_PER_DAY));
-}
-
-function snapTrack(y: number): number {
-  return Math.round(y / TIMELINE_TRACK_HEIGHT) * TIMELINE_TRACK_HEIGHT;
+function sameJsonValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 /**
  * `/projects/:id` — single-project workspace.
  *
  * The view is driven by `project.status`:
- *   - `research-ready`: literature panel with a CTA to generate the workflow.
- *   - `ready`: tabbed graph / statistics / literature view.
+ *   - `research-ready`: literature panel with a CTA to generate the calendar.
+ *   - `ready`: tabbed calendar / statistics / literature view.
  *   - `researching` / `generating`: loading screen (rare — only when a stale
  *     status is fetched mid-flight; the normal loading lives at the call
  *     site).
@@ -155,13 +129,13 @@ export function ProjectPage() {
     return (
       <LoadingScreen
         eyebrow="Designing the experiment"
-        title="Drafting your timeline"
-        detail="Mapping milestones, dependencies, and prep work for the experiment."
+        title="Drafting your calendar"
+        detail="Placing scheduled tasks into day buckets for the experiment calendar."
         prompt={project.hypothesis}
         steps={[
-          "Sequencing the experimental steps",
-          "Slotting in pilot and refinement runs",
-          "Estimating effort per milestone",
+          "Drafting scheduled task cards",
+          "Grouping work into week and day buckets",
+          "Estimating effort, resources, and budget",
         ]}
       />
     );
@@ -180,7 +154,7 @@ export function ProjectPage() {
 
   if (project.status === "research-ready" || !project.workflow) {
     if (!activePage) {
-      return <Navigate to={`/projects/${project.id}/graph`} replace />;
+      return <Navigate to={`/projects/${project.id}/calendar`} replace />;
     }
 
     return (
@@ -196,7 +170,7 @@ export function ProjectPage() {
   }
 
   if (!activePage) {
-    return <Navigate to={`/projects/${project.id}/graph`} replace />;
+    return <Navigate to={`/projects/${project.id}/calendar`} replace />;
   }
 
   return (
@@ -231,72 +205,139 @@ function ProjectWorkspaceView({
   onGenerate,
   onProjectChange,
 }: WorkflowViewProps) {
+  const navigate = useNavigate();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const workflowBaseDate = useMemo(() => getWorkflowBaseDate(workflow), [workflow]);
-
-  const flowNodes = useMemo<Node<WorkflowNodeData>[]>(
+  const [learningNotice, setLearningNotice] = useState<string | null>(null);
+  const [qaOpen, setQaOpen] = useState(false);
+  const [riskOpen, setRiskOpen] = useState(false);
+  const [qaMessagesByPlan, setQaMessagesByPlan] = useState<Record<string, PlanQAMessage[]>>({});
+  const planId = project.finalPlan?.plan_id ?? null;
+  const qaMessages = planId ? (qaMessagesByPlan[planId] ?? []) : [];
+  const nodeLabels = useMemo(
     () =>
-      (workflow?.nodes ?? []).map((n, index) => ({
-        id: n.id,
-        type: "workflow",
-        position: {
-          x: getDayOffset(workflowBaseDate, n.data.startDate) * TIMELINE_DAY_WIDTH,
-          y: snapTrack(n.position.y),
-        },
-        data: n.data as WorkflowNodeData,
-        draggable: index !== 0,
-      })),
-    [workflow?.nodes, workflowBaseDate],
-  );
-
-  const flowEdges = useMemo<Edge[]>(
-    () =>
-      (workflow?.edges ?? []).map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-      })),
-    [workflow?.edges],
+      Object.fromEntries(
+        (workflow?.nodes ?? []).map((node) => [node.id, node.data.stepName]),
+      ),
+    [workflow?.nodes],
   );
 
   const selectedNode = useMemo(
-    () => flowNodes.find((n) => n.id === selectedNodeId) ?? null,
-    [flowNodes, selectedNodeId],
+    () => (workflow?.nodes ?? []).find((n) => n.id === selectedNodeId) ?? null,
+    [workflow?.nodes, selectedNodeId],
   );
 
-  const hasGraph = flowNodes.length > 0;
+  const hasCalendar = (workflow?.nodes ?? []).length > 0;
 
   useEffect(() => {
-    if (page !== "graph") setSelectedNodeId(null);
+    if (page !== "calendar") setSelectedNodeId(null);
   }, [page]);
+
+  useEffect(() => {
+    if (page !== "calendar") setQaOpen(false);
+  }, [page]);
+
+  useEffect(() => {
+    if (!learningNotice) return;
+    const timeout = window.setTimeout(() => setLearningNotice(null), 3600);
+    return () => window.clearTimeout(timeout);
+  }, [learningNotice]);
 
   const handleNodeDataChange = useCallback(
     async (nodeId: string, data: WorkflowNodeData) => {
-      const next = await updateWorkflowNode(project.id, nodeId, data);
-      onProjectChange(next);
+      const current = workflow?.nodes.find((node) => node.id === nodeId);
+      if (!current) return;
+      const currentData = current.data as Record<string, unknown>;
+      const edits = (Object.entries(data) as Array<[keyof WorkflowNodeData, unknown]>)
+        .filter(([field, value]) => !sameJsonValue(currentData[String(field)], value))
+        .map(([field, value]): PlanEditRequest => ({
+          change_source: "frontend_calendar_edit",
+          target_type: "task",
+          target_id: nodeId,
+          field_changed: String(field),
+          old_value: currentData[String(field)],
+          new_value: value,
+          metadata: { ui_context: "calendar_task_detail_panel" },
+        }));
+      if (edits.length === 0) return;
+      const result = await applyPlanEdits(project.id, edits);
+      onProjectChange(result.project);
+      if (result.generated_lesson_cards.length > 0) {
+        setLearningNotice("Learning saved: Future similar experiments will use this correction.");
+      }
     },
-    [onProjectChange, project.id],
+    [onProjectChange, project.id, workflow?.nodes],
   );
 
-  const handleNodeMove = useCallback(
-    (nodeId: string, position: { x: number; y: number }) => {
-      const firstNodeId = workflow?.nodes[0]?.id;
-      if (!workflow || nodeId === firstNodeId) return;
+  const handleTaskMove = useCallback(
+    (taskId: string, startDate: string) => {
+      if (!workflow) return;
+      const current = workflow.nodes.find((node) => node.id === taskId);
+      if (!current || current.data.startDate === startDate) return;
 
-      const snappedX = Math.max(0, Math.round(position.x / TIMELINE_DAY_WIDTH) * TIMELINE_DAY_WIDTH);
-      const snappedY = snapTrack(position.y);
-      const startDate = formatWorkflowDate(
-        addWorkflowDays(workflowBaseDate, Math.round(snappedX / TIMELINE_DAY_WIDTH)),
-      );
-
-      void updateWorkflowNode(
-        project.id,
-        nodeId,
-        { startDate },
-        { x: snappedX, y: snappedY },
-      ).then(onProjectChange);
+      void applyPlanEdit(project.id, {
+        change_source: "frontend_calendar_edit",
+        target_type: "task",
+        target_id: taskId,
+        field_changed: "startDate",
+        old_value: current.data.startDate,
+        new_value: startDate,
+        change_type: "task_moved",
+        metadata: {
+          ui_context: "week_calendar_move",
+        },
+      }).then((result) => {
+        onProjectChange(result.project);
+        if (result.generated_lesson_cards.length > 0) {
+          setLearningNotice("Learning saved: Future similar experiments will use this schedule correction.");
+        }
+      });
     },
-    [onProjectChange, project.id, workflow, workflowBaseDate],
+    [onProjectChange, project.id, workflow],
+  );
+
+  const handleQAMessagesChange = useCallback(
+    (messages: PlanQAMessage[]) => {
+      if (!planId) return;
+      setQaMessagesByPlan((current) => ({
+        ...current,
+        [planId]: messages,
+      }));
+    },
+    [planId],
+  );
+
+  const handleQAAction = useCallback(
+    (action: PlanQASuggestedAction) => {
+      if (
+        (action.type === "open_node" || action.type === "highlight_node") &&
+        action.target_id
+      ) {
+        setSelectedNodeId(action.target_id);
+        navigate(`/projects/${project.id}/calendar`);
+        return;
+      }
+      if (
+        action.type === "open_report_section" ||
+        action.type === "open_purchase_list" ||
+        action.type === "open_risk_summary"
+      ) {
+        navigate(`/projects/${project.id}/statistics`);
+        return;
+      }
+      if (action.type === "open_citation") {
+        navigate(`/projects/${project.id}/literature`);
+      }
+    },
+    [navigate, project.id],
+  );
+
+  const handleRiskHighlight = useCallback(
+    (nodeId: string) => {
+      setSelectedNodeId(nodeId);
+      setRiskOpen(false);
+      navigate(`/projects/${project.id}/calendar`);
+    },
+    [navigate, project.id],
   );
 
   return (
@@ -308,25 +349,81 @@ function ProjectWorkspaceView({
         }
       />
 
-      {page === "graph" && workflow ? (
+      <SetupWarningBanner warnings={project.setup_warnings} mode={project.generation_mode} />
+
+      {learningNotice ? (
+        <div className="pointer-events-none absolute right-6 top-24 z-20 rounded-md border border-[color:var(--border-default)] bg-bg-surface px-3 py-2 text-[12px] font-medium text-text-primary shadow-md">
+          {learningNotice}
+        </div>
+      ) : null}
+
+      {page === "calendar" && workflow ? (
         <section className="relative min-h-[560px] flex-1 overflow-hidden bg-bg-primary">
-          {hasGraph ? (
-            <TimelineGraph
-              initialNodes={flowNodes}
-              initialEdges={flowEdges}
-              selectedNodeId={selectedNodeId}
-              onNodeSelect={setSelectedNodeId}
-              onNodeMove={handleNodeMove}
-            />
+          {hasCalendar ? (
+            <div className="flex h-full min-h-[560px]">
+              <div className="relative min-w-0 flex-1">
+                <CalendarView
+                  workflow={workflow}
+                  selectedTaskId={selectedNodeId}
+                  onTaskSelect={setSelectedNodeId}
+                  onTaskMove={handleTaskMove}
+                  headerActions={
+                    planId ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setRiskOpen(true)}
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded-sm border border-[color:var(--border-default)] bg-bg-surface px-3 py-1.5",
+                            "text-[13px] font-medium text-text-secondary shadow-sm transition-colors hover:bg-bg-hover hover:text-text-primary",
+                          )}
+                        >
+                          <ShieldAlert size={14} strokeWidth={1.75} />
+                          Analyze Risks
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setQaOpen(true)}
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded-sm",
+                            "border border-[color:var(--border-default)] bg-bg-surface px-3 py-1.5",
+                            "text-[13px] font-medium text-text-secondary shadow-sm transition-colors",
+                            "hover:bg-bg-hover hover:text-text-primary",
+                            qaOpen && "hidden lg:inline-flex",
+                          )}
+                        >
+                          <MessageCircle size={14} strokeWidth={1.75} />
+                          Ask about this plan
+                        </button>
+                      </>
+                    ) : null
+                  }
+                />
+              </div>
+              {qaOpen && planId ? (
+                <PlanQASidebar
+                  planId={planId}
+                  selectedNodeId={selectedNodeId}
+                  messages={qaMessages}
+                  onMessagesChange={handleQAMessagesChange}
+                  onClose={() => setQaOpen(false)}
+                  onAction={handleQAAction}
+                  onProjectChange={onProjectChange}
+                  onLearningSaved={() => {
+                    setLearningNotice("Plan updated and learning saved.");
+                  }}
+                />
+              ) : null}
+            </div>
           ) : (
             <div className="flex h-full items-center justify-center px-8 text-center">
               <p className="max-w-[44ch] text-[13px] leading-[1.55] text-text-tertiary">
-                No workflow graph was returned for this project yet.
+                No scheduled tasks were returned for this project yet.
               </p>
             </div>
           )}
         </section>
-      ) : page === "graph" ? (
+      ) : page === "calendar" ? (
         <ResearchGraphPage project={project} onGenerate={onGenerate} />
       ) : page === "statistics" ? (
         workflow ? (
@@ -334,6 +431,8 @@ function ProjectWorkspaceView({
             prompt={project.hypothesis}
             papers={project.papers ?? []}
             workflow={workflow}
+            finalPlan={project.finalPlan}
+            onAnalyzeRisks={planId ? () => setRiskOpen(true) : undefined}
           />
         ) : (
           <GeneratePlaceholder onGenerate={onGenerate} />
@@ -342,14 +441,22 @@ function ProjectWorkspaceView({
         <LiteratureTab papers={project.papers ?? []} />
       )}
 
-      {page === "graph" && selectedNode ? (
+      {page === "calendar" && selectedNode && !qaOpen ? (
         <WorkflowNodeDetailPanel
           key={selectedNode.id}
-          data={selectedNode.data}
+          data={selectedNode.data as WorkflowNodeData}
           onChange={(data) => handleNodeDataChange(selectedNode.id, data)}
           onClose={() => setSelectedNodeId(null)}
         />
       ) : null}
+
+      <RiskAnalyzerModal
+        open={riskOpen}
+        planId={planId}
+        nodeLabels={nodeLabels}
+        onClose={() => setRiskOpen(false)}
+        onHighlightStep={handleRiskHighlight}
+      />
     </main>
   );
 }
@@ -368,7 +475,7 @@ function ResearchGraphPage({
     <section className="mx-auto flex w-full max-w-[1080px] flex-1 flex-col gap-5 overflow-y-auto px-8 py-8">
       <header>
         <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
-          Related work graph
+          Related work map
         </p>
         <h2 className="mt-1 font-sans text-[22px] font-medium tracking-[-0.01em] text-text-primary">
           {papers.length} papers with similar experiments
@@ -385,7 +492,7 @@ function ResearchGraphPage({
       <div className="rounded-md border border-[color:var(--border-default)] bg-bg-surface p-5 shadow-sm">
         {papers.length === 0 ? (
           <p className="py-12 text-center text-[13px] text-text-tertiary">
-            No related papers were returned. You can still build the timeline
+            No related papers were returned. You can still build the calendar
             from your hypothesis.
           </p>
         ) : (
@@ -416,7 +523,7 @@ function PrePlanCard({ prePlan }: { prePlan: PrePlan }) {
           <div className="flex items-center gap-2">
             <GitBranch size={14} strokeWidth={1.5} className="text-text-tertiary" />
             <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
-              Pre-plan maker DAG
+              Procedure task template
             </p>
             <ConfidenceBadge
               confidence={prePlan.experiment_summary.reconstruction_confidence}
@@ -432,7 +539,7 @@ function PrePlanCard({ prePlan }: { prePlan: PrePlan }) {
 
         <dl className="grid shrink-0 grid-cols-3 gap-2 text-center">
           <Metric label="Steps" value={String(nodes.length)} />
-          <Metric label="Edges" value={String(prePlan.dag.edges.length)} />
+          <Metric label="Templates" value={String(nodes.length)} />
           <Metric label="Sources" value={String(prePlan.source_documents.length)} />
         </dl>
       </div>
@@ -507,7 +614,7 @@ function GeneratePlaceholder({ onGenerate }: { onGenerate: () => void }) {
     <section className="flex flex-1 items-center justify-center px-8 py-24 text-center">
       <div className="flex max-w-[42ch] flex-col items-center gap-3">
         <h2 className="font-sans text-[22px] font-medium tracking-[-0.01em] text-text-primary">
-          Build the experiment timeline first
+          Build the experiment calendar first
         </h2>
         <p className="text-[13px] leading-[1.55] text-text-secondary">
           Statistics are generated from the workflow milestones, effort, and
@@ -541,6 +648,29 @@ function LiteratureTab({ papers }: { papers: Paper[] }) {
       </header>
       <PaperList papers={papers} />
     </section>
+  );
+}
+
+function SetupWarningBanner({
+  warnings,
+  mode,
+}: {
+  warnings?: string[];
+  mode?: Project["generation_mode"];
+}) {
+  const visibleWarnings = (warnings ?? []).filter(Boolean).slice(0, 2);
+  if (visibleWarnings.length === 0) return null;
+  const label =
+    mode === "openai"
+      ? "Connected mode"
+      : mode === "partial"
+        ? "Partial mode"
+        : "Demo mode";
+  return (
+    <div className="border-b border-[color:var(--border-default)] bg-accent-subtle px-8 py-2 text-[12px] leading-[1.45] text-text-secondary">
+      <span className="font-medium text-text-primary">{label}:</span>{" "}
+      {visibleWarnings.join(" ")}
+    </div>
   );
 }
 
@@ -606,7 +736,7 @@ function BuildTimelineButton({ onGenerate }: { onGenerate: () => void }) {
       )}
     >
       <CalendarRange size={14} strokeWidth={1.75} />
-      Build experiment timeline
+      Build experiment calendar
     </button>
   );
 }

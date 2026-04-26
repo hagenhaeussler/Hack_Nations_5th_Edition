@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "description": "LabPilot — AI co-pilot for planning biology lab experiments (references, timelines, budgeting).",
+  "engines": {
+    "node": ">=20"
+  },
   "workspaces": [
     "frontend",
     "backend"

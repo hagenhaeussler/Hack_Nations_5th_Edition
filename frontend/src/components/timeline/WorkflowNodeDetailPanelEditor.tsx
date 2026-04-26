@@ -53,8 +53,6 @@ const ARRAY_FIELDS = [
   ["experts", "Experts"],
   ["citationsToPaper", "Citations to paper"],
   ["validationCriteria", "Validation criteria"],
-  ["parentIds", "Parent IDs"],
-  ["childrenIds", "Children IDs"],
 ] as const;
 
 interface WorkflowNodeDetailPanelProps {

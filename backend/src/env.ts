@@ -1,4 +1,7 @@
-import "dotenv/config";
+import { config as loadDotenv } from "dotenv";
+
+loadDotenv();
+loadDotenv({ path: "backend/.env", override: false });
 
 const toInt = (v: string | undefined, fallback: number): number => {
   const parsed = v ? Number.parseInt(v, 10) : NaN;

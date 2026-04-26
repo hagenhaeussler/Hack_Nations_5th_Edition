@@ -50,7 +50,7 @@ export function LandingPage() {
 
     try {
       const project = await startResearch(hypothesis, attachments);
-      navigate(`/projects/${project.id}/graph`);
+      navigate(`/projects/${project.id}/calendar`);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       setError(message);
@@ -89,7 +89,7 @@ export function LandingPage() {
             </h1>
             <p className="max-w-[52ch] text-[15px] leading-[1.6] text-text-secondary">
               Describe what you want to test. LabPilot will surface related
-              work, design experiments, draft a timeline, and estimate the
+              work, design experiments, draft a calendar, and estimate the
               budget.
             </p>
           </header>

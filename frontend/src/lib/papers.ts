@@ -16,6 +16,9 @@ export interface Paper {
   similarity: number;
   abstract: string;
   url?: string;
+  provider?: string;
+  novelty_relation?: string;
+  is_fallback?: boolean;
 }
 
 export function similarityLabel(score: number): string {

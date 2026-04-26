@@ -173,6 +173,7 @@ export function PaperGraph({ prompt: _prompt, papers, onSelect }: PaperGraphProp
               {selected.authors[0]}
               {selected.authors.length > 1 ? " et al." : ""} · {selected.venue} ·{" "}
               {selected.year}
+              {selected.is_fallback ? " · Demo source" : ""}
             </p>
             <div className="flex items-center gap-2">
               <span

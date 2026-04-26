@@ -24,9 +24,14 @@ export function PaperList({ papers }: PaperListProps) {
               <h3 className="text-[14px] font-medium leading-[1.45] text-text-primary">
                 {paper.title}
               </h3>
-              <p className="mt-1 text-[12px] text-text-secondary">
-                {paper.authors.join(", ")} · {paper.venue} · {paper.year}
-              </p>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-text-secondary">
+                <span>{paper.authors.join(", ")} · {paper.venue} · {paper.year}</span>
+                {paper.is_fallback ? (
+                  <span className="rounded-full border border-[color:var(--border-default)] bg-accent-subtle px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.04em] text-accent">
+                    Demo source
+                  </span>
+                ) : null}
+              </div>
             </div>
             <SimilarityBadge similarity={paper.similarity} />
           </div>
