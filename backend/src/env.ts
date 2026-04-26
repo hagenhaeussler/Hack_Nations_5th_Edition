@@ -12,7 +12,7 @@ const defaultMockLatencyMs = 0;
 
 export const env = {
   port: toInt(process.env.PORT, 4000),
-  uploadDir: process.env.UPLOAD_DIR ?? "./uploads",
+  uploadDir: process.env.UPLOAD_DIR ?? (process.env.VERCEL === "1" ? "/tmp/labpilot-uploads" : "./uploads"),
   maxUploadMb: toInt(process.env.MAX_UPLOAD_MB, 25),
   /**
    * Postgres connection string. When unset, the projects repo falls back to

@@ -21,9 +21,28 @@ import projectsRouter from "./routes/projects.js";
 
 export const app = express();
 
+let schemaReadyPromise: Promise<void> | null = null;
+
+function ensureSchemaOnce(): Promise<void> {
+  if (!getPool()) return Promise.resolve();
+  schemaReadyPromise ??= ensureSchema().then(() => {
+    console.log("[labpilot] postgres schema ensured");
+  });
+  return schemaReadyPromise;
+}
+
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
+
+app.use(async (_req: Request, _res: Response, next: NextFunction) => {
+  try {
+    await ensureSchemaOnce();
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
 app.use("/api/health", healthRouter);
 app.use("/api/benchmark", benchmarkRouter);
@@ -54,8 +73,7 @@ export async function bootstrap(): Promise<void> {
   // wired up.
   if (getPool()) {
     try {
-      await ensureSchema();
-      console.log("[labpilot] postgres schema ensured");
+      await ensureSchemaOnce();
     } catch (err) {
       console.error("[labpilot] failed to ensure schema; continuing with readable endpoint errors", err);
     }
