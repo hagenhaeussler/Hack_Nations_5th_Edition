@@ -1,6 +1,6 @@
 # LabPilot
 
-# Live Website: https://hack-nations-5th-edition-frontend-91wrfg2b7.vercel.app/
+# Live Website: https://labpilotfrontend-production.up.railway.app/
 
 > An AI co-pilot for planning biology lab experiments — references, timelines, budgets, and protocols, all in one calm workspace.
 
