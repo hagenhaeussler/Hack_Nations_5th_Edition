@@ -146,7 +146,7 @@ export class FeedbackLearningService {
     let nextWorkflow = applyNormalizedEdit(project.workflow, normalized);
 
     const validation = validateWorkflowDAG(nextWorkflow);
-    if (!validation.valid) {
+    if (validation.valid === false) {
       throw new FeedbackLearningError(validation.errors.join(" "));
     }
 

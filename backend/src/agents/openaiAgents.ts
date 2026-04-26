@@ -52,7 +52,7 @@ export async function runAgentWithFallback<T>(args: {
     temperature: 0.15,
   });
 
-  if (result.ok) {
+  if (result.ok === true) {
     return {
       data: result.data,
       mode: "openai",

@@ -331,7 +331,7 @@ export function validatePlanPatch(
   }
 
   const dagValidation = validateWorkflowDAG(nextWorkflow);
-  if (!dagValidation.valid) errors.push(...dagValidation.errors);
+  if (dagValidation.valid === false) errors.push(...dagValidation.errors);
 
   const blastRadius = estimateBlastRadius(
     maxRisk,
