@@ -37,7 +37,6 @@ export function LoadingScreen({
   eyebrow,
   title,
   detail,
-  prompt,
   steps = [],
   estimatedDurationMs = 10000,
   progressLabel = "Estimated progress",

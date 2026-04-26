@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Beaker,
   BookOpen,
@@ -141,17 +141,57 @@ export function WorkflowNodeDetailPanel({
   onChange,
   onClose,
 }: WorkflowNodeDetailPanelProps) {
+  const panelRef = useRef<HTMLElement | null>(null);
+  const closeTimeoutRef = useRef<number | null>(null);
+  const isClosingRef = useRef(false);
   const [draft, setDraft] = useState<Draft>(() => dataToDraft(data));
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [isVisible, setIsVisible] = useState(false);
   const status = draft.status ?? "upcoming";
   const icon = draft.icon ?? "beaker";
   const Icon = ICON_MAP[icon] ?? Beaker;
+
+  const closeWithAnimation = useCallback(() => {
+    if (isClosingRef.current) return;
+    isClosingRef.current = true;
+    setIsVisible(false);
+    closeTimeoutRef.current = window.setTimeout(onClose, 300);
+  }, [onClose]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setIsVisible(true));
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (closeTimeoutRef.current !== null) {
+        window.clearTimeout(closeTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     setDraft(dataToDraft(data));
     setDirty(false);
   }, [data]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") closeWithAnimation();
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const panel = panelRef.current;
+      if (!panel || !(event.target instanceof Node)) return;
+      if (!panel.contains(event.target)) closeWithAnimation();
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [closeWithAnimation]);
 
   const serializedDraft = useMemo(() => JSON.stringify(draft), [draft]);
 
@@ -172,13 +212,15 @@ export function WorkflowNodeDetailPanel({
 
   return (
     <aside
+      ref={panelRef}
       role="complementary"
       aria-label={`${draft.stepName} details`}
       className={cn(
         "fixed inset-y-0 right-0 z-30 flex w-full flex-col",
         "border-l border-[color:var(--border-default)] bg-bg-surface shadow-lg",
         "lg:w-1/3",
-        "animate-slide-in-right",
+        "transform-gpu transition-transform duration-300 ease-in-out",
+        isVisible ? "translate-x-0" : "translate-x-full",
       )}
     >
       <header className="flex items-start gap-3 border-b border-[color:var(--border-default)] px-6 py-5">
@@ -210,7 +252,7 @@ export function WorkflowNodeDetailPanel({
 
         <button
           type="button"
-          onClick={onClose}
+          onClick={closeWithAnimation}
           aria-label="Close details"
           className={cn(
             "flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-text-tertiary",

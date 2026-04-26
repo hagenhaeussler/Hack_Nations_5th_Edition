@@ -5,15 +5,18 @@ import {
   ChevronRight,
   FlaskConical,
   FolderKanban,
-  Home,
   CalendarRange,
+  MoreHorizontal,
   PenSquare,
+  Share2,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
-import { NavLink, useMatch } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, NavLink, useMatch } from "react-router-dom";
 
 import { LogoMark } from "@/components/LogoMark";
+import { getProject } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface AppSidebarProps {
@@ -55,10 +58,31 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
   const projectMatch = useMatch("/projects/:id/*");
   const projectId = projectMatch?.params.id;
   const expanded = !collapsed;
+  const [projectTitle, setProjectTitle] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!projectId) {
+      setProjectTitle(null);
+      return;
+    }
+
+    let cancelled = false;
+    setProjectTitle(null);
+    getProject(projectId)
+      .then((project) => {
+        if (!cancelled) setProjectTitle(project.title);
+      })
+      .catch(() => {
+        if (!cancelled) setProjectTitle("Project");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   const primaryNav: NavItem[] = projectId
     ? [
-        { to: "/", label: "New Project", icon: Home, end: true },
         { to: `/projects/${projectId}/calendar`, label: "Calendar", icon: CalendarRange },
         {
           to: `/projects/${projectId}/statistics`,
@@ -117,6 +141,12 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
 
       {/* Primary nav */}
       <nav aria-label="Sections" className="flex flex-col gap-0.5 px-2 pt-2">
+        {projectId ? (
+          <CurrentProjectMenu
+            collapsed={!expanded}
+            projectTitle={projectTitle}
+          />
+        ) : null}
         {primaryNav.map((item) => (
           <SidebarLink key={item.to} item={item} collapsed={!expanded} />
         ))}
@@ -134,6 +164,106 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
         ))}
       </nav>
     </aside>
+  );
+}
+
+function abbreviateProjectTitle(title: string | null): string {
+  const cleaned = title?.replace(/\s+/g, " ").trim();
+  if (!cleaned) return "Project";
+  if (cleaned.length <= 24) return cleaned;
+  return `${cleaned.slice(0, 21).trimEnd()}...`;
+}
+
+interface CurrentProjectMenuProps {
+  collapsed: boolean;
+  projectTitle: string | null;
+}
+
+function CurrentProjectMenu({ collapsed, projectTitle }: CurrentProjectMenuProps) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const label = abbreviateProjectTitle(projectTitle);
+  const fullTitle = projectTitle ?? "Current project";
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timeout = window.setTimeout(() => setCopied(false), 1500);
+    return () => window.clearTimeout(timeout);
+  }, [copied]);
+
+  const shareProject = async () => {
+    const url = window.location.href;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+    } catch (err) {
+      console.warn("[labpilot] Could not copy project link.", err);
+    }
+  };
+
+  if (collapsed) return null;
+
+  return (
+    <div ref={rootRef} className="group relative">
+      <div
+        className={cn(
+          "flex h-9 items-center gap-2.5 rounded-sm px-3 text-[13px] text-text-primary",
+          "transition-colors duration-[var(--duration-fast)] group-hover:bg-[color:var(--bg-hover)]",
+        )}
+        title={fullTitle}
+      >
+        <span className="min-w-0 flex-1 truncate font-bold">{label}</span>
+        <button
+          type="button"
+          aria-label="Project options"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+          className={cn(
+            "-mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-text-tertiary",
+            "opacity-0 transition-[opacity,background-color,color] duration-[var(--duration-fast)]",
+            "hover:bg-bg-surface hover:text-text-primary focus:opacity-100 focus:outline-none",
+            "focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]/35",
+            (open || copied) && "opacity-100",
+            "group-hover:opacity-100",
+          )}
+        >
+          <MoreHorizontal size={16} strokeWidth={1.6} />
+        </button>
+      </div>
+
+      {open ? (
+        <div className="absolute left-2 right-2 top-full z-50 mt-1 rounded-md border border-[color:var(--border-default)] bg-bg-surface p-1 text-[13px] shadow-lg">
+          <button
+            type="button"
+            onClick={() => {
+              void shareProject();
+            }}
+            className="flex w-full items-center gap-2 rounded-sm px-2.5 py-2 text-left text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+          >
+            <Share2 size={14} strokeWidth={1.6} />
+            {copied ? "Link copied" : "Share project"}
+          </button>
+          <Link
+            to="/projects"
+            onClick={() => setOpen(false)}
+            className="flex w-full items-center gap-2 rounded-sm px-2.5 py-2 text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+          >
+            <FolderKanban size={14} strokeWidth={1.6} />
+            Project list
+          </Link>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

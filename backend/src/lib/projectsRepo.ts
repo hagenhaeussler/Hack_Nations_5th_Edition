@@ -47,6 +47,19 @@ export interface ProjectsRepo {
   list(): Promise<Project[]>;
 }
 
+function withUncheckedTasks(workflow: Workflow): Workflow {
+  return {
+    ...workflow,
+    nodes: workflow.nodes.map((node) => ({
+      ...node,
+      data: {
+        ...node.data,
+        status: "upcoming",
+      },
+    })),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // In-memory fallback
 // ---------------------------------------------------------------------------
@@ -117,10 +130,11 @@ class MemoryProjectsRepo implements ProjectsRepo {
   ): Promise<Project | null> {
     const existing = this.store.get(id);
     if (!existing) return null;
+    const uncheckedWorkflow = withUncheckedTasks(workflow);
     const next: Project = {
       ...existing,
       finalPlan,
-      workflow,
+      workflow: uncheckedWorkflow,
       setup_warnings: setupWarnings,
       generation_mode: generationMode,
       status: "ready",
@@ -136,9 +150,10 @@ class MemoryProjectsRepo implements ProjectsRepo {
   ): Promise<Project | null> {
     const existing = this.store.get(id);
     if (!existing) return null;
+    const uncheckedWorkflow = withUncheckedTasks(workflow);
     const next: Project = {
       ...existing,
-      workflow,
+      workflow: uncheckedWorkflow,
       status: "ready",
       updatedAt: new Date().toISOString(),
     };
@@ -288,6 +303,7 @@ class PostgresProjectsRepo implements ProjectsRepo {
   ): Promise<Project | null> {
     const pool = getPool();
     if (!pool) throw new Error("PostgresProjectsRepo used without a pool");
+    const uncheckedWorkflow = withUncheckedTasks(workflow);
     const result = await pool.query<ProjectRow>(
       `UPDATE projects
           SET final_plan = $2::jsonb,
@@ -299,7 +315,7 @@ class PostgresProjectsRepo implements ProjectsRepo {
         WHERE id = $1
         RETURNING id, hypothesis, title, description, status, papers, pre_plan, final_plan, workflow,
                   setup_warnings, generation_mode, created_at, updated_at`,
-      [id, JSON.stringify(finalPlan), JSON.stringify(workflow), JSON.stringify(setupWarnings), generationMode],
+      [id, JSON.stringify(finalPlan), JSON.stringify(uncheckedWorkflow), JSON.stringify(setupWarnings), generationMode],
     );
     return result.rows[0] ? rowToProject(result.rows[0]) : null;
   }
@@ -310,6 +326,7 @@ class PostgresProjectsRepo implements ProjectsRepo {
   ): Promise<Project | null> {
     const pool = getPool();
     if (!pool) throw new Error("PostgresProjectsRepo used without a pool");
+    const uncheckedWorkflow = withUncheckedTasks(workflow);
     const result = await pool.query<ProjectRow>(
       `UPDATE projects
           SET workflow   = $2::jsonb,
@@ -318,7 +335,7 @@ class PostgresProjectsRepo implements ProjectsRepo {
         WHERE id = $1
         RETURNING id, hypothesis, title, description, status, papers, pre_plan, final_plan, workflow,
                   setup_warnings, generation_mode, created_at, updated_at`,
-      [id, JSON.stringify(workflow)],
+      [id, JSON.stringify(uncheckedWorkflow)],
     );
     return result.rows[0] ? rowToProject(result.rows[0]) : null;
   }

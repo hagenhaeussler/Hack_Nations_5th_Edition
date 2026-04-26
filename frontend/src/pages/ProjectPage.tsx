@@ -23,11 +23,9 @@ import {
 } from "@/lib/api";
 import { buildPaperRelevanceExplanation, similarityLabel, type Paper } from "@/lib/papers";
 import {
-  STATUS_LABEL,
   type PlanEditRequest,
   type Project,
   type Workflow,
-  formatRelativeTime,
 } from "@/lib/projects";
 import { cn } from "@/lib/utils";
 
@@ -262,6 +260,17 @@ function ProjectWorkspaceView({
     return () => window.clearTimeout(timeout);
   }, [learningNotice]);
 
+  // Surface backend setup warnings (e.g. "Supabase is not configured…") to the
+  // browser console instead of taking up vertical space in the UI. We dedupe so
+  // navigating between calendar / statistics / literature does not spam logs.
+  useEffect(() => {
+    const warnings = (project.setup_warnings ?? []).filter(Boolean);
+    if (warnings.length === 0) return;
+    for (const message of warnings) {
+      console.warn(`[labpilot] ${message}`);
+    }
+  }, [project.setup_warnings]);
+
   const handleNodeDataChange = useCallback(
     async (nodeId: string, data: WorkflowNodeData) => {
       const current = workflow?.nodes.find((node) => node.id === nodeId);
@@ -315,6 +324,62 @@ function ProjectWorkspaceView({
     [onProjectChange, project.id, workflow],
   );
 
+  const handleTaskDurationChange = useCallback(
+    (taskId: string, timeEstimate: string) => {
+      if (!workflow) return;
+      const current = workflow.nodes.find((node) => node.id === taskId);
+      if (!current || current.data.timeEstimate === timeEstimate) return;
+
+      void applyPlanEdit(project.id, {
+        change_source: "frontend_calendar_edit",
+        target_type: "task",
+        target_id: taskId,
+        field_changed: "timeEstimate",
+        old_value: current.data.timeEstimate,
+        new_value: timeEstimate,
+        change_type: "task_resized",
+        metadata: {
+          ui_context: "week_calendar_resize",
+        },
+      }).then((result) => {
+        onProjectChange(result.project);
+        if (result.generated_lesson_cards.length > 0) {
+          setLearningNotice(
+            "Learning saved: Future similar experiments will use this duration correction.",
+          );
+        }
+      });
+    },
+    [onProjectChange, project.id, workflow],
+  );
+
+  const handleTaskStatusChange = useCallback(
+    (taskId: string, status: NonNullable<Workflow["nodes"][number]["data"]["status"]>) => {
+      if (!workflow) return;
+      const current = workflow.nodes.find((node) => node.id === taskId);
+      if (!current || (current.data.status ?? "upcoming") === status) return;
+
+      void applyPlanEdit(project.id, {
+        change_source: "frontend_calendar_edit",
+        target_type: "task",
+        target_id: taskId,
+        field_changed: "status",
+        old_value: current.data.status ?? "upcoming",
+        new_value: status,
+        change_type: "task_completion_toggled",
+        metadata: {
+          ui_context: "week_calendar_completion_toggle",
+        },
+      }).then((result) => {
+        onProjectChange(result.project);
+        if (result.generated_lesson_cards.length > 0) {
+          setLearningNotice("Learning saved: Future similar experiments will use this status correction.");
+        }
+      });
+    },
+    [onProjectChange, project.id, workflow],
+  );
+
   const handleQAMessagesChange = useCallback(
     (messages: PlanQAMessage[]) => {
       if (!planId) return;
@@ -362,21 +427,16 @@ function ProjectWorkspaceView({
 
   return (
     <main className="relative flex h-screen min-h-0 flex-col overflow-hidden">
-      <ProjectHeader
-        project={project}
-        right={
-          showsLiteratureWorkspace ? (
-            <ViewModeToggle
-              viewMode={literatureViewMode}
-              onToggle={() =>
-                setLiteratureViewMode((mode) => (mode === "papers" ? "graph" : "papers"))
-              }
-            />
-          ) : undefined
-        }
-      />
-
-      <SetupWarningBanner warnings={project.setup_warnings} mode={project.generation_mode} />
+      {showsLiteratureWorkspace ? (
+        <div className="absolute right-6 top-4 z-20">
+          <ViewModeToggle
+            viewMode={literatureViewMode}
+            onToggle={() =>
+              setLiteratureViewMode((mode) => (mode === "papers" ? "graph" : "papers"))
+            }
+          />
+        </div>
+      ) : null}
 
       {learningNotice ? (
         <div className="pointer-events-none absolute right-6 top-24 z-20 rounded-md border border-[color:var(--border-default)] bg-bg-surface px-3 py-2 text-[12px] font-medium text-text-primary shadow-md">
@@ -391,9 +451,12 @@ function ProjectWorkspaceView({
               <div className="relative min-w-0 flex-1">
                 <CalendarView
                   workflow={workflow}
+                  planCreatedAt={project.finalPlan?.created_at ?? project.createdAt}
                   selectedTaskId={selectedNodeId}
                   onTaskSelect={setSelectedNodeId}
                   onTaskMove={handleTaskMove}
+                  onTaskDurationChange={handleTaskDurationChange}
+                  onTaskStatusChange={handleTaskStatusChange}
                   headerActions={
                     planId ? (
                       <>
@@ -811,88 +874,6 @@ function LiteratureTab({
         setSelectedPaperId((current) => (current === paper.id ? null : paper.id))
       }
     />
-  );
-}
-
-function SetupWarningBanner({
-  warnings,
-  mode,
-}: {
-  warnings?: string[];
-  mode?: Project["generation_mode"];
-}) {
-  const [dismissed, setDismissed] = useState(false);
-  const visibleWarnings = (warnings ?? []).filter(Boolean).slice(0, 2);
-  if (dismissed || visibleWarnings.length === 0) return null;
-  const label =
-    mode === "openai"
-      ? "Connected mode"
-      : mode === "partial"
-        ? "Partial mode"
-        : "Demo mode";
-  return (
-    <div className="flex items-start justify-between gap-4 border-b border-[color:var(--border-default)] bg-accent-subtle px-8 py-2 text-[12px] leading-[1.45] text-text-secondary">
-      <p>
-        <span className="font-medium text-text-primary">{label}:</span>{" "}
-        {visibleWarnings.join(" ")}
-      </p>
-      <button
-        type="button"
-        onClick={() => setDismissed(true)}
-        className="shrink-0 rounded-full p-0.5 text-text-tertiary hover:bg-bg-hover hover:text-text-primary"
-        aria-label="Dismiss setup warning"
-      >
-        <X size={14} strokeWidth={1.75} />
-      </button>
-    </div>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/*  Shared chrome                                                              */
-/* -------------------------------------------------------------------------- */
-
-interface ProjectHeaderProps {
-  project: Project;
-  right?: React.ReactNode;
-}
-
-function ProjectHeader({ project, right }: ProjectHeaderProps) {
-  return (
-    <header
-      className={cn(
-        "flex items-start justify-between gap-6 border-b border-[color:var(--border-default)]",
-        "bg-bg-primary/95 px-8 pb-4 pt-6 backdrop-blur",
-      )}
-    >
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <h1 className="line-clamp-1 max-w-[760px] font-sans text-[22px] font-medium tracking-[-0.01em] text-text-primary">
-            {project.title}
-          </h1>
-          <span
-            className={cn(
-              "rounded-full px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.06em]",
-              project.status === "ready"
-                ? "bg-[color:var(--accent-subtle)] text-accent"
-                : "bg-bg-hover text-text-secondary",
-            )}
-          >
-            {STATUS_LABEL[project.status]}
-          </span>
-          <span className="text-[11.5px] text-text-tertiary">
-            · {formatRelativeTime(project.updatedAt)}
-          </span>
-        </div>
-        {project.description ? (
-          <p className="mt-1 line-clamp-1 max-w-[760px] text-[12.5px] leading-[1.4] text-text-secondary">
-            {project.description}
-          </p>
-        ) : null}
-      </div>
-
-      {right ? <div className="shrink-0">{right}</div> : null}
-    </header>
   );
 }
 
