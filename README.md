@@ -1,5 +1,7 @@
 # LabPilot
 
+# Live Website: https://hack-nations-5th-edition-frontend-91wrfg2b7.vercel.app/
+
 > An AI co-pilot for planning biology lab experiments — references, timelines, budgets, and protocols, all in one calm workspace.
 
 This repo is an **npm workspaces** monorepo with two packages:
