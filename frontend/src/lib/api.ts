@@ -113,7 +113,42 @@ async function jsonRequest<T>(path: string, init?: JsonRequestInit): Promise<T> 
  * `status: "research-ready"`. Callers should render a loading screen for the
  * duration.
  */
-export async function startResearch(hypothesis: string): Promise<Project> {
+export async function startResearch(
+  hypothesis: string,
+  attachments: Attachment[] = [],
+): Promise<Project> {
+  if (attachments.length > 0) {
+    const form = new FormData();
+    form.append("hypothesis", hypothesis);
+    for (const attachment of attachments) {
+      if (attachment.kind === "file") {
+        form.append("files", attachment.file, attachment.file.name);
+        form.append("fileCategories", attachment.category);
+      } else {
+        form.append("links", attachment.url);
+        form.append("linkCategories", attachment.category);
+      }
+    }
+
+    const res = await fetch("/api/projects/research", {
+      method: "POST",
+      body: form,
+    });
+    const payload = (await res
+      .json()
+      .catch(() => null)) as ApiResponse<{ project: Project }> | null;
+
+    if (!res.ok || !payload) {
+      const message =
+        payload && payload.ok === false ? payload.error : res.statusText;
+      throw new Error(message || `Backend error: ${res.status}`);
+    }
+    if (payload.ok === false) {
+      throw new Error(payload.error || `Backend error: ${res.status}`);
+    }
+    return payload.project;
+  }
+
   const res = await jsonRequest<{ project: Project }>("/api/projects/research", {
     method: "POST",
     body: { hypothesis },

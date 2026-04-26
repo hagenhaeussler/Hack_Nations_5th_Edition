@@ -35,10 +35,14 @@ const SCHEMA_SQL = `
     title        text        NOT NULL,
     status       text        NOT NULL,
     papers       jsonb,
+    pre_plan     jsonb,
     workflow     jsonb,
     created_at   timestamptz NOT NULL DEFAULT now(),
     updated_at   timestamptz NOT NULL DEFAULT now()
   );
+
+  ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS pre_plan jsonb;
 
   CREATE INDEX IF NOT EXISTS projects_updated_at_idx
     ON projects (updated_at DESC);

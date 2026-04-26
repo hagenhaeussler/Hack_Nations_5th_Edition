@@ -1,4 +1,4 @@
-import type { Workflow } from "./projectTypes.js";
+import type { PrePlan, PrePlanNode, Workflow } from "./projectTypes.js";
 
 /**
  * Mock workflow returned by the generation endpoint.
@@ -295,8 +295,124 @@ const TEMPLATE: Workflow = {
   ],
 };
 
-/** Returns the mock workflow. Stable across calls; ignores the prompt for now. */
-export function generateWorkflow(_prompt: string): Workflow {
+function durationLabel(step: PrePlanNode): string | undefined {
+  const { value, unit, basis } = step.estimated_duration;
+  if (value !== null) return `${value} ${unit}`;
+  return basis ? `Unknown ${unit}` : undefined;
+}
+
+function detailForStep(step: PrePlanNode): string {
+  return step.step_purpose || "Procedure step reconstructed from source material.";
+}
+
+function iconForStep(step: PrePlanNode): string {
+  const text = `${step.step_name} ${step.step_purpose}`.toLowerCase();
+  if (/literature|source|paper|review/.test(text)) return "book";
+  if (/order|buy|reagent|material|purchase/.test(text)) return "package";
+  if (/control|approval|validate|quality|qc/.test(text)) return "shield";
+  if (/analy|sequence|data|statistic/.test(text)) return "flask";
+  if (/protocol|design|select|prepare/.test(text)) return "clipboard";
+  if (/image|measure|microscope|assay/.test(text)) return "microscope";
+  return "beaker";
+}
+
+function topologicalPrePlanNodes(prePlan: PrePlan): PrePlanNode[] {
+  const nodesById = new Map(prePlan.dag.nodes.map((node) => [node.node_id, node]));
+  const indegree = new Map(prePlan.dag.nodes.map((node) => [node.node_id, 0]));
+  const children = new Map<string, string[]>(
+    prePlan.dag.nodes.map((node) => [node.node_id, []]),
+  );
+
+  for (const edge of prePlan.dag.edges) {
+    if (!nodesById.has(edge.from) || !nodesById.has(edge.to)) continue;
+    indegree.set(edge.to, (indegree.get(edge.to) ?? 0) + 1);
+    children.get(edge.from)?.push(edge.to);
+  }
+
+  const queue = prePlan.dag.nodes
+    .filter((node) => (indegree.get(node.node_id) ?? 0) === 0)
+    .map((node) => node.node_id);
+  const ordered: PrePlanNode[] = [];
+
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    const node = nodesById.get(id);
+    if (!node) continue;
+    ordered.push(node);
+
+    for (const childId of children.get(id) ?? []) {
+      const next = (indegree.get(childId) ?? 0) - 1;
+      indegree.set(childId, next);
+      if (next === 0) queue.push(childId);
+    }
+  }
+
+  return ordered.length === prePlan.dag.nodes.length
+    ? ordered
+    : prePlan.dag.nodes;
+}
+
+function workflowFromPrePlan(prePlan: PrePlan): Workflow {
+  const orderedNodes = topologicalPrePlanNodes(prePlan);
+  const orderById = new Map(
+    orderedNodes.map((node, index) => [node.node_id, index]),
+  );
+  const rowById = new Map<string, number>();
+
+  for (const node of orderedNodes) {
+    const siblingIndex = node.parent_ids.length
+      ? node.parent_ids.reduce(
+          (acc, parentId) =>
+            acc + (prePlan.dag.nodes.find((n) => n.node_id === parentId)?.child_ids.indexOf(node.node_id) ?? 0),
+          0,
+        )
+      : 0;
+    rowById.set(node.node_id, siblingIndex % 3);
+  }
+
+  return {
+    nodes: orderedNodes.map((node, index) => {
+      const row = rowById.get(node.node_id) ?? 0;
+      const y = row === 0 ? 0 : row % 2 === 1 ? -150 : 150;
+      const evidence = node.source_citations[0];
+      const sourceLine = evidence
+        ? `Source: ${evidence.document_id}, ${evidence.location}.`
+        : "Source citation unavailable.";
+
+      return {
+        id: node.node_id,
+        position: { x: index * 300, y },
+        data: {
+          title: node.step_name,
+          schedule: node.start.value ?? undefined,
+          detail: detailForStep(node),
+          status: index === 0 ? "active" : "upcoming",
+          icon: iconForStep(node),
+          effort: durationLabel(node),
+          description: `${node.procedure}\n\n${sourceLine}`,
+          deliverables: node.validation_criteria,
+          checklist: [
+            ...node.validation_criteria,
+            ...node.uncertainties.map((item) => `Resolve uncertainty: ${item}`),
+          ],
+        },
+      };
+    }),
+    edges: prePlan.dag.edges
+      .filter((edge) => orderById.has(edge.from) && orderById.has(edge.to))
+      .map((edge) => ({
+        id: `e:${edge.from}-${edge.to}`,
+        source: edge.from,
+        target: edge.to,
+      })),
+  };
+}
+
+/** Returns a workflow from the pre-plan DAG, falling back to the mock template. */
+export function generateWorkflow(_prompt: string, prePlan?: PrePlan): Workflow {
+  if (prePlan && prePlan.dag.nodes.length > 0) {
+    return workflowFromPrePlan(prePlan);
+  }
   // Deep-clone so callers can mutate without bleeding into the template.
   return JSON.parse(JSON.stringify(TEMPLATE)) as Workflow;
 }

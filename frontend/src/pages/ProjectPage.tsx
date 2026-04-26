@@ -1,4 +1,4 @@
-import { CalendarRange, Sparkles } from "lucide-react";
+import { CalendarRange, GitBranch, ListChecks, Sparkles } from "lucide-react";
 import type { Edge, Node } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
@@ -14,6 +14,7 @@ import { generateProject, getProject } from "@/lib/api";
 import type { Paper } from "@/lib/papers";
 import {
   STATUS_LABEL,
+  type PrePlan,
   type Project,
   type Workflow,
   formatRelativeTime,
@@ -294,6 +295,8 @@ function ResearchGraphPage({
         ) : null}
       </header>
 
+      {project.prePlan ? <PrePlanCard prePlan={project.prePlan} /> : null}
+
       <div className="rounded-md border border-[color:var(--border-default)] bg-bg-surface p-5 shadow-sm">
         {papers.length === 0 ? (
           <p className="py-12 text-center text-[13px] text-text-tertiary">
@@ -311,6 +314,106 @@ function ResearchGraphPage({
         <BuildTimelineButton onGenerate={onGenerate} />
       </div>
     </section>
+  );
+}
+
+function PrePlanCard({ prePlan }: { prePlan: PrePlan }) {
+  const nodes = prePlan.dag.nodes;
+  const resourcePreview = [
+    ...prePlan.global_resources.equipment.slice(0, 3),
+    ...prePlan.global_resources.materials.slice(0, 3),
+  ].slice(0, 5);
+
+  return (
+    <section className="rounded-md border border-[color:var(--border-default)] bg-bg-surface p-4 shadow-sm">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <GitBranch size={14} strokeWidth={1.5} className="text-text-tertiary" />
+            <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
+              Pre-plan maker DAG
+            </p>
+            <ConfidenceBadge
+              confidence={prePlan.experiment_summary.reconstruction_confidence}
+            />
+          </div>
+          <h3 className="mt-1 font-sans text-[17px] font-medium tracking-[-0.01em] text-text-primary">
+            {prePlan.experiment_summary.title}
+          </h3>
+          <p className="mt-1 max-w-[78ch] text-[13px] leading-[1.55] text-text-secondary">
+            {prePlan.summary}
+          </p>
+        </div>
+
+        <dl className="grid shrink-0 grid-cols-3 gap-2 text-center">
+          <Metric label="Steps" value={String(nodes.length)} />
+          <Metric label="Edges" value={String(prePlan.dag.edges.length)} />
+          <Metric label="Sources" value={String(prePlan.source_documents.length)} />
+        </dl>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-[1.4fr_1fr]">
+        <div className="rounded-md border border-[color:var(--border-default)] bg-bg-primary p-3">
+          <div className="mb-2 flex items-center gap-2">
+            <ListChecks size={14} strokeWidth={1.5} className="text-text-tertiary" />
+            <h4 className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
+              Reconstructed steps
+            </h4>
+          </div>
+          <ol className="flex flex-col gap-2">
+            {nodes.slice(0, 5).map((node) => (
+              <li key={node.node_id} className="text-[13px] leading-[1.5]">
+                <span className="font-medium text-text-primary">
+                  {node.step_name}
+                </span>
+                <span className="text-text-secondary"> · {node.step_purpose}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+
+        <div className="rounded-md border border-[color:var(--border-default)] bg-bg-primary p-3">
+          <h4 className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
+            Resources and gaps
+          </h4>
+          {resourcePreview.length > 0 ? (
+            <p className="mt-2 text-[13px] leading-[1.55] text-text-secondary">
+              {resourcePreview.join(", ")}
+            </p>
+          ) : (
+            <p className="mt-2 text-[13px] text-text-tertiary">
+              No concrete resources were extracted.
+            </p>
+          )}
+          {prePlan.open_questions.length > 0 ? (
+            <p className="mt-3 line-clamp-3 text-[12.5px] leading-[1.55] text-text-tertiary">
+              Open question: {prePlan.open_questions[0]}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ConfidenceBadge({ confidence }: { confidence: PrePlan["experiment_summary"]["reconstruction_confidence"] }) {
+  return (
+    <span className="rounded-full bg-bg-hover px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.05em] text-text-secondary">
+      {confidence} confidence
+    </span>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-16 rounded-sm border border-[color:var(--border-default)] bg-bg-primary px-2 py-1.5">
+      <dt className="text-[10px] uppercase tracking-[0.06em] text-text-tertiary">
+        {label}
+      </dt>
+      <dd className="mt-0.5 text-[15px] font-medium text-text-primary">
+        {value}
+      </dd>
+    </div>
   );
 }
 

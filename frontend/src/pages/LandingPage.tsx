@@ -41,7 +41,7 @@ export function LandingPage() {
     ? `${greeting}, ${firstName}.`
     : `${greeting}.`;
 
-  const handleSubmit = async ({ text }: PromptSubmitPayload) => {
+  const handleSubmit = async ({ text, attachments }: PromptSubmitPayload) => {
     const hypothesis = text.trim();
     if (hypothesis.length === 0) return;
 
@@ -49,7 +49,7 @@ export function LandingPage() {
     setPendingPrompt(hypothesis);
 
     try {
-      const project = await startResearch(hypothesis);
+      const project = await startResearch(hypothesis, attachments);
       navigate(`/projects/${project.id}/graph`);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { getPool } from "./db.js";
 import type {
   Paper,
+  PrePlan,
   Project,
   ProjectStatus,
   Workflow,
@@ -24,6 +25,11 @@ import type {
 export interface ProjectsRepo {
   create(input: { hypothesis: string; title: string }): Promise<Project>;
   attachPapers(id: string, papers: Paper[]): Promise<Project | null>;
+  attachResearchResults(
+    id: string,
+    papers: Paper[],
+    prePlan: PrePlan,
+  ): Promise<Project | null>;
   attachWorkflow(id: string, workflow: Workflow): Promise<Project | null>;
   setStatus(id: string, status: ProjectStatus): Promise<Project | null>;
   get(id: string): Promise<Project | null>;
@@ -60,6 +66,24 @@ class MemoryProjectsRepo implements ProjectsRepo {
     const next: Project = {
       ...existing,
       papers,
+      status: "research-ready",
+      updatedAt: new Date().toISOString(),
+    };
+    this.store.set(id, next);
+    return next;
+  }
+
+  async attachResearchResults(
+    id: string,
+    papers: Paper[],
+    prePlan: PrePlan,
+  ): Promise<Project | null> {
+    const existing = this.store.get(id);
+    if (!existing) return null;
+    const next: Project = {
+      ...existing,
+      papers,
+      prePlan,
       status: "research-ready",
       updatedAt: new Date().toISOString(),
     };
@@ -119,6 +143,7 @@ interface ProjectRow {
   title: string;
   status: ProjectStatus;
   papers: Paper[] | null;
+  pre_plan: PrePlan | null;
   workflow: Workflow | null;
   created_at: Date;
   updated_at: Date;
@@ -134,6 +159,7 @@ function rowToProject(row: ProjectRow): Project {
     updatedAt: row.updated_at.toISOString(),
   };
   if (row.papers) project.papers = row.papers;
+  if (row.pre_plan) project.prePlan = row.pre_plan;
   if (row.workflow) project.workflow = row.workflow;
   return project;
 }
@@ -149,7 +175,7 @@ class PostgresProjectsRepo implements ProjectsRepo {
     const result = await pool.query<ProjectRow>(
       `INSERT INTO projects (id, hypothesis, title, status)
        VALUES ($1, $2, $3, 'researching')
-       RETURNING id, hypothesis, title, status, papers, workflow,
+       RETURNING id, hypothesis, title, status, papers, pre_plan, workflow,
                  created_at, updated_at`,
       [id, hypothesis, title],
     );
@@ -165,9 +191,30 @@ class PostgresProjectsRepo implements ProjectsRepo {
               status     = 'research-ready',
               updated_at = now()
         WHERE id = $1
-        RETURNING id, hypothesis, title, status, papers, workflow,
+        RETURNING id, hypothesis, title, status, papers, pre_plan, workflow,
                   created_at, updated_at`,
       [id, JSON.stringify(papers)],
+    );
+    return result.rows[0] ? rowToProject(result.rows[0]) : null;
+  }
+
+  async attachResearchResults(
+    id: string,
+    papers: Paper[],
+    prePlan: PrePlan,
+  ): Promise<Project | null> {
+    const pool = getPool();
+    if (!pool) throw new Error("PostgresProjectsRepo used without a pool");
+    const result = await pool.query<ProjectRow>(
+      `UPDATE projects
+          SET papers     = $2::jsonb,
+              pre_plan   = $3::jsonb,
+              status     = 'research-ready',
+              updated_at = now()
+        WHERE id = $1
+        RETURNING id, hypothesis, title, status, papers, pre_plan, workflow,
+                  created_at, updated_at`,
+      [id, JSON.stringify(papers), JSON.stringify(prePlan)],
     );
     return result.rows[0] ? rowToProject(result.rows[0]) : null;
   }
@@ -184,7 +231,7 @@ class PostgresProjectsRepo implements ProjectsRepo {
               status     = 'ready',
               updated_at = now()
         WHERE id = $1
-        RETURNING id, hypothesis, title, status, papers, workflow,
+        RETURNING id, hypothesis, title, status, papers, pre_plan, workflow,
                   created_at, updated_at`,
       [id, JSON.stringify(workflow)],
     );
@@ -202,7 +249,7 @@ class PostgresProjectsRepo implements ProjectsRepo {
           SET status     = $2,
               updated_at = now()
         WHERE id = $1
-        RETURNING id, hypothesis, title, status, papers, workflow,
+        RETURNING id, hypothesis, title, status, papers, pre_plan, workflow,
                   created_at, updated_at`,
       [id, status],
     );
@@ -213,7 +260,7 @@ class PostgresProjectsRepo implements ProjectsRepo {
     const pool = getPool();
     if (!pool) throw new Error("PostgresProjectsRepo used without a pool");
     const result = await pool.query<ProjectRow>(
-      `SELECT id, hypothesis, title, status, papers, workflow,
+      `SELECT id, hypothesis, title, status, papers, pre_plan, workflow,
               created_at, updated_at
          FROM projects
         WHERE id = $1`,
@@ -226,7 +273,7 @@ class PostgresProjectsRepo implements ProjectsRepo {
     const pool = getPool();
     if (!pool) throw new Error("PostgresProjectsRepo used without a pool");
     const result = await pool.query<ProjectRow>(
-      `SELECT id, hypothesis, title, status, papers, workflow,
+      `SELECT id, hypothesis, title, status, papers, pre_plan, workflow,
               created_at, updated_at
          FROM projects
         ORDER BY updated_at DESC`,

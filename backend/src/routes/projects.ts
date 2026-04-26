@@ -2,7 +2,12 @@ import { Router, type Request, type Response } from "express";
 
 import { env } from "../env.js";
 import { getSimilarPapers } from "../lib/papers.js";
+import {
+  generatePrePlan,
+  type PrePlanInputDocument,
+} from "../lib/prePlanMaker.js";
 import { getProjectsRepo } from "../lib/projectsRepo.js";
+import { upload } from "../lib/uploads.js";
 import { generateWorkflow } from "../lib/workflow.js";
 
 const router: Router = Router();
@@ -16,6 +21,52 @@ const sleep = (ms: number) =>
 function paramId(value: unknown): string | null {
   if (typeof value === "string" && value.length > 0) return value;
   return null;
+}
+
+function stringFields(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string");
+  }
+  return typeof value === "string" ? [value] : [];
+}
+
+function sourceTypeFromCategory(
+  category: string | undefined,
+): PrePlanInputDocument["sourceType"] {
+  switch (category) {
+    case "paper-link":
+      return "paper_link";
+    case "lab-sheet":
+      return "lab_context";
+    case "paper-pdf":
+    case "other-pdf":
+      return "uploaded_file";
+    default:
+      return "unknown";
+  }
+}
+
+function sourceDocumentsFromRequest(req: Request): PrePlanInputDocument[] {
+  const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+  const fileCategories = stringFields(req.body?.fileCategories);
+  const links = stringFields(req.body?.links);
+  const linkCategories = stringFields(req.body?.linkCategories);
+
+  const uploaded = files.map<PrePlanInputDocument>((file, index) => ({
+    id: `upload_${String(index + 1).padStart(3, "0")}`,
+    title: file.originalname,
+    sourceType: sourceTypeFromCategory(fileCategories[index]),
+    fileName: file.originalname,
+  }));
+
+  const linked = links.map<PrePlanInputDocument>((url, index) => ({
+    id: `link_${String(index + 1).padStart(3, "0")}`,
+    title: url,
+    sourceType: sourceTypeFromCategory(linkCategories[index] ?? "paper-link"),
+    url,
+  }));
+
+  return [...uploaded, ...linked];
 }
 
 /**
@@ -60,15 +111,18 @@ router.get("/:id", async (req: Request, res: Response) => {
 /**
  * POST /api/projects/research
  *
- * Body: `{ "hypothesis": string }`
+ * Body:
+ *   JSON: `{ "hypothesis": string }`
+ *   multipart: `hypothesis`, `files`, `fileCategories`, `links`, `linkCategories`
  *
  * Creates a project, simulates the literature-search latency, then attaches
- * the mock paper set. The frontend should redirect to a loading screen the
- * moment it gets the project id back, and poll / await this response before
- * routing to the research view. We intentionally hold the response open for
- * `MOCK_LATENCY_MS` so the loading screen has something to wait on.
+ * the mock paper set and a Pre-Plan Maker DAG. The frontend should redirect
+ * to a loading screen the moment it gets the project id back, and poll / await
+ * this response before routing to the research view. We intentionally hold the
+ * response open for `MOCK_LATENCY_MS` so the loading screen has something to
+ * wait on.
  */
-router.post("/research", async (req: Request, res: Response) => {
+router.post("/research", upload.array("files", 10), async (req: Request, res: Response) => {
   const hypothesis =
     typeof req.body?.hypothesis === "string" ? req.body.hypothesis.trim() : "";
 
@@ -85,7 +139,12 @@ router.post("/research", async (req: Request, res: Response) => {
   await sleep(env.mockLatencyMs);
 
   const papers = getSimilarPapers(hypothesis);
-  const updated = await repo.attachPapers(project.id, papers);
+  const prePlan = generatePrePlan({
+    hypothesis,
+    papers,
+    documents: sourceDocumentsFromRequest(req),
+  });
+  const updated = await repo.attachResearchResults(project.id, papers, prePlan);
   if (!updated) {
     res
       .status(500)
@@ -119,7 +178,7 @@ router.post("/:id/generate", async (req: Request, res: Response) => {
 
   await sleep(env.mockLatencyMs);
 
-  const workflow = generateWorkflow(existing.hypothesis);
+  const workflow = generateWorkflow(existing.hypothesis, existing.prePlan);
   const updated = await repo.attachWorkflow(id, workflow);
   if (!updated) {
     res
