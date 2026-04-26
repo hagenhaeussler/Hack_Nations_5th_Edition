@@ -291,6 +291,27 @@ The result is a feedback loop: the Creator Agent creates a plan, the scientist c
 
 ---
 
+## Benchmark Evaluation System
+
+The Benchmark Evaluation System allows researchers to grade the quality of generated experiment plans. After the Creator Agent creates a calendar-based plan, the researcher can open an evaluation popup from the Calendar View and score the plan from 0 to 100 across multiple categories: timing estimate accuracy, task scheduling logic, procedure correctness, budget accuracy, equipment and personnel accuracy, citation quality, and validation criteria quality.
+
+The system stores both the overall average benchmark score and the individual category scores. The researcher can also submit written feedback describing what was good, wrong, missing, unrealistic, or useful. This written feedback is stored as benchmark insight data and can be retrieved by the Creator Agent during future planning.
+
+A separate Benchmark Dashboard shows all evaluation results over time as a bar chart. The x-axis represents trial order or time, and the y-axis represents the overall score from 0 to 100. Clicking a bar opens the evaluation details and links back to the report for the plan that was graded.
+
+This creates a measurable improvement loop: the Creator Agent generates a plan, the researcher grades it, the benchmark score is stored, feedback is converted into reusable insight, and future Creator Agent runs can use those insights to produce better plans.
+
+Implementation entry points:
+
+- `POST /api/plans/:plan_id/evaluations` saves a benchmark evaluation for the current calendar plan.
+- `GET /api/benchmark/evaluations` returns evaluations in chronological order.
+- `GET /api/benchmark/summary` returns aggregate benchmark performance metrics.
+- `GET /api/benchmark/insights/relevant` returns reusable benchmark insights for Creator Agent context.
+- `frontend/src/components/benchmark/BenchmarkEvaluationModal.tsx` renders the Calendar View evaluation popup.
+- `frontend/src/pages/BenchmarkDashboardPage.tsx` renders the benchmark dashboard.
+
+---
+
 ## Plan Editor Agent
 
 The Plan Editor Agent is a contextual editing assistant inside the Experiment Calendar. It uses the same right-side chat interface as the Question-Answer Agent, but unlike the Q&A Agent, it can safely modify the current experiment plan.

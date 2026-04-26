@@ -5,6 +5,12 @@ import { randomUUID } from "node:crypto";
 import { buildEditorPatchWithOpenAI } from "../agents/openaiAgents.js";
 import { fallbackEditorPatch } from "../agents/fallbackAgents.js";
 import { runQAAgent } from "../agents/agentOrchestrator.js";
+import {
+  BenchmarkValidationError,
+  getBenchmarkRepo,
+  validateBenchmarkScores,
+} from "../lib/benchmarkRepo.js";
+import type { BenchmarkEvaluationContext } from "../lib/benchmarkTypes.js";
 import { getSetupWarnings } from "../lib/config.js";
 import { FeedbackLearningService } from "../lib/feedbackLearningService.js";
 import { getLearningRepo } from "../lib/learningRepo.js";
@@ -28,6 +34,7 @@ const router: Router = Router();
 const projectsRepo = getProjectsRepo();
 const learningRepo = getLearningRepo();
 const feedbackLearning = new FeedbackLearningService(projectsRepo, learningRepo);
+const benchmarkRepo = getBenchmarkRepo();
 
 function paramId(value: unknown): string | null {
   if (typeof value === "string" && value.length > 0) return value;
@@ -180,6 +187,21 @@ async function getPlanProject(planId: string, res: Response) {
   return project;
 }
 
+function benchmarkContextForProject(planId: string, project: NonNullable<Awaited<ReturnType<typeof projectsRepo.getByPlanId>>>): BenchmarkEvaluationContext {
+  const currentPlan = getCurrentPlan(project);
+  return {
+    project_id: project.id,
+    plan_id: planId,
+    project_title: project.title,
+    plan_title: currentPlan?.experiment_title ?? project.finalPlan?.experiment_title ?? "Untitled calendar plan",
+    hypothesis: project.hypothesis,
+    domain: currentPlan?.domain ?? project.finalPlan?.domain ?? null,
+    experiment_type: currentPlan?.experiment_type ?? project.finalPlan?.experiment_type ?? null,
+    generation_mode: project.generation_mode ?? null,
+    model_name: null,
+  };
+}
+
 router.get("/:plan_id", async (req: Request, res: Response) => {
   const planId = paramId(req.params.plan_id);
   if (!planId) {
@@ -270,6 +292,54 @@ router.get("/:plan_id/report/pdf", async (req: Request, res: Response) => {
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.status(200).send(pdf);
+});
+
+router.post("/:plan_id/evaluations", async (req: Request, res: Response) => {
+  const planId = paramId(req.params.plan_id);
+  if (!planId) {
+    res.status(400).json({ ok: false, error: "Missing plan id." });
+    return;
+  }
+
+  const project = await projectsRepo.getByPlanId(planId);
+  if (!project?.finalPlan) {
+    res.status(404).json({ ok: false, error: "Plan not found." });
+    return;
+  }
+
+  try {
+    const scores = validateBenchmarkScores(req.body?.scores);
+    const writtenFeedback =
+      typeof req.body?.written_feedback === "string"
+        ? req.body.written_feedback.slice(0, 5000)
+        : null;
+    const metadata =
+      req.body?.metadata && typeof req.body.metadata === "object"
+        ? (req.body.metadata as Record<string, unknown>)
+        : {};
+    const result = await benchmarkRepo.saveEvaluation({
+      context: benchmarkContextForProject(planId, project),
+      scores,
+      written_feedback: writtenFeedback,
+      metadata: {
+        source_view: "calendar_view",
+        ...metadata,
+      },
+    });
+    res.status(201).json({
+      ok: true,
+      success: true,
+      evaluation: result.evaluation,
+      insight: result.insight,
+      warnings: result.warnings,
+    });
+  } catch (err) {
+    if (err instanceof BenchmarkValidationError) {
+      res.status(400).json({ ok: false, error: err.message });
+      return;
+    }
+    throw err;
+  }
 });
 
 router.post("/:plan_id/risk-analysis", async (req: Request, res: Response) => {

@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { AppShell } from "@/components/AppShell";
+import { BenchmarkDashboardPage } from "@/pages/BenchmarkDashboardPage";
 import { LabSettingsPage } from "@/pages/LabSettingsPage";
 import { LandingPage } from "@/pages/LandingPage";
 import { PersonalSettingsPage } from "@/pages/PersonalSettingsPage";
@@ -28,6 +29,7 @@ export default function App() {
     <Routes>
       <Route element={<AppShell />}>
         <Route index element={<LandingPage />} />
+        <Route path="benchmark" element={<BenchmarkDashboardPage />} />
         <Route path="projects" element={<ProjectsListPage />} />
         <Route path="projects/:id" element={<ProjectPage />} />
         <Route path="projects/:id/:page" element={<ProjectPage />} />

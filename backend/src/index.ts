@@ -9,6 +9,7 @@ import express, {
 import { env } from "./env.js";
 import { getMissingServiceMessage } from "./lib/config.js";
 import { ensureSchema, getPool } from "./lib/db.js";
+import benchmarkRouter from "./routes/benchmark.js";
 import chatRouter from "./routes/chat.js";
 import creatorAgentRouter from "./routes/creatorAgent.js";
 import healthRouter from "./routes/health.js";
@@ -24,6 +25,7 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api/health", healthRouter);
+app.use("/api/benchmark", benchmarkRouter);
 app.use("/api/chat", chatRouter);
 app.use("/api/creator-agent", creatorAgentRouter);
 app.use("/api/jobs", jobsRouter);

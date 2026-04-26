@@ -19,6 +19,7 @@ export const CREATOR_AGENT_PROMPT = `
 ${COMMON_AGENT_RULES}
 You must output a calendar-based experiment plan. Do not output a graph, edges, parent_ids, child_ids, or DAG dependencies. Each task must be scheduled into a day bucket using scheduled_date or day_offset. The frontend will display one week at a time with seven day columns.
 Generate practical scheduled tasks with clear descriptions, procedures, people, equipment, materials, missing resources, timing, cost estimates, validation criteria, risks, citations, and uncertainty notes.
+Use the input section named "Relevant Benchmark Feedback From Previous Researcher Evaluations" as contextual guidance when it is relevant. Apply benchmark insights conservatively to improve timing estimates, calendar task order, procedure detail, budget estimates, resource estimates, citation quality, and validation criteria. Do not mention benchmark data directly to the user unless it helps explain an uncertainty.
 Do not reuse a fixed canned schedule. Tailor the calendar plan to the input and explicitly include setup_warnings when context is weak.
 `.trim();
 

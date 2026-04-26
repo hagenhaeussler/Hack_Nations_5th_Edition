@@ -109,6 +109,7 @@ export async function generatePlanWithOpenAI(args: {
   prePlan?: unknown;
   chunks?: unknown[];
   lessons?: unknown[];
+  benchmarkInsights?: unknown;
   previousPlan?: FinalExperimentPlan | null;
   fallbackFn: () => ExperimentPlan;
 }): Promise<AgentRunResult<ExperimentPlan>> {
@@ -126,6 +127,7 @@ export async function generatePlanWithOpenAI(args: {
       prePlan: args.prePlan ?? null,
       chunks: args.chunks ?? [],
       lessons: args.lessons ?? [],
+      benchmarkInsights: args.benchmarkInsights ?? [],
       previousPlan: args.previousPlan ?? null,
     },
     fallbackFn: args.fallbackFn,

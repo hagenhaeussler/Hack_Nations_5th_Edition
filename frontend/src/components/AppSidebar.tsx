@@ -32,6 +32,7 @@ interface NavItem {
 const PRIMARY_NAV: NavItem[] = [
   { to: "/", label: "New Project", icon: PenSquare, end: true },
   { to: "/projects", label: "Projects", icon: FolderKanban },
+  { to: "/benchmark", label: "Benchmark", icon: BarChart3 },
 ];
 
 const SETTINGS_NAV: NavItem[] = [
@@ -70,6 +71,7 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
           label: "Literature",
           icon: BookOpen,
         },
+        { to: "/benchmark", label: "Benchmark", icon: BarChart3 },
       ]
     : PRIMARY_NAV;
 

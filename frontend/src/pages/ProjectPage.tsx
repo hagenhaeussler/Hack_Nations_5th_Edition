@@ -1,8 +1,9 @@
-import { CalendarRange, ExternalLink, MessageCircle, ShieldAlert, X } from "lucide-react";
+import { CalendarRange, ExternalLink, MessageCircle, ShieldAlert, Star, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { LoadingScreen } from "@/components/LoadingScreen";
+import { BenchmarkEvaluationModal } from "@/components/benchmark/BenchmarkEvaluationModal";
 import { CalendarView } from "@/components/calendar/CalendarView";
 import { PaperGraph } from "@/components/PaperGraph";
 import { PaperList } from "@/components/PaperList";
@@ -19,6 +20,7 @@ import {
   applyPlanEdits,
   generateProject,
   getProject,
+  type BenchmarkEvaluation,
   type PlanQASuggestedAction,
 } from "@/lib/api";
 import { buildPaperRelevanceExplanation, similarityLabel, type Paper } from "@/lib/papers";
@@ -210,6 +212,7 @@ function ProjectWorkspaceView({
   const [learningNotice, setLearningNotice] = useState<string | null>(null);
   const [qaOpen, setQaOpen] = useState(false);
   const [riskOpen, setRiskOpen] = useState(false);
+  const [evaluationOpen, setEvaluationOpen] = useState(false);
   const [literatureViewMode, setLiteratureViewMode] = useState<LiteratureViewMode>("papers");
   const [qaMessagesByPlan, setQaMessagesByPlan] = useState<Record<string, PlanQAMessage[]>>({});
   const planId = project.finalPlan?.plan_id ?? null;
@@ -342,6 +345,10 @@ function ProjectWorkspaceView({
     [navigate, project.id],
   );
 
+  const handleEvaluationSaved = useCallback((_evaluation: BenchmarkEvaluation) => {
+    setLearningNotice("Evaluation saved. This feedback will help improve future Creator Agent plans.");
+  }, []);
+
   return (
     <main className="relative flex h-screen min-h-0 flex-col overflow-hidden">
       <ProjectHeader
@@ -379,6 +386,17 @@ function ProjectWorkspaceView({
                   headerActions={
                     planId ? (
                       <>
+                        <button
+                          type="button"
+                          onClick={() => setEvaluationOpen(true)}
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded-sm border border-[color:var(--border-default)] bg-bg-surface px-3 py-1.5",
+                            "text-[13px] font-medium text-text-secondary shadow-sm transition-colors hover:bg-bg-hover hover:text-text-primary",
+                          )}
+                        >
+                          <Star size={14} strokeWidth={1.75} />
+                          Evaluate Plan
+                        </button>
                         <button
                           type="button"
                           onClick={() => setRiskOpen(true)}
@@ -469,6 +487,13 @@ function ProjectWorkspaceView({
         nodeLabels={nodeLabels}
         onClose={() => setRiskOpen(false)}
         onHighlightStep={handleRiskHighlight}
+      />
+      <BenchmarkEvaluationModal
+        open={evaluationOpen}
+        project={project}
+        planId={planId}
+        onClose={() => setEvaluationOpen(false)}
+        onSaved={handleEvaluationSaved}
       />
     </main>
   );

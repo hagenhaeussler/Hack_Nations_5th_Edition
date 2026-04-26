@@ -137,6 +137,57 @@ const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS lesson_cards_relevance_idx
     ON lesson_cards (status, domain, experiment_type, step_type);
+
+  CREATE TABLE IF NOT EXISTS benchmark_evaluations (
+    id                              text        PRIMARY KEY,
+    trial_id                        text        NOT NULL,
+    project_id                      text,
+    plan_id                         text,
+    project_title                   text        NOT NULL,
+    plan_title                      text        NOT NULL,
+    hypothesis                      text        NOT NULL,
+    domain                          text,
+    experiment_type                 text,
+    generation_mode                 text,
+    model_name                      text,
+    overall_score                   numeric     NOT NULL,
+    timing_estimate_accuracy        numeric     NOT NULL,
+    sequential_scheduling_logic     numeric     NOT NULL,
+    procedure_correctness           numeric     NOT NULL,
+    budget_estimate_accuracy        numeric     NOT NULL,
+    equipment_personnel_accuracy    numeric     NOT NULL,
+    citation_quality                numeric     NOT NULL,
+    validation_criteria_quality     numeric     NOT NULL,
+    written_feedback                text,
+    scores_json                     jsonb       NOT NULL DEFAULT '{}'::jsonb,
+    metadata                        jsonb       NOT NULL DEFAULT '{}'::jsonb,
+    created_at                      timestamptz NOT NULL DEFAULT now()
+  );
+
+  CREATE INDEX IF NOT EXISTS benchmark_evaluations_created_at_idx
+    ON benchmark_evaluations (created_at ASC);
+
+  CREATE INDEX IF NOT EXISTS benchmark_evaluations_plan_id_idx
+    ON benchmark_evaluations (plan_id, created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS benchmark_insights (
+    id                  text        PRIMARY KEY,
+    evaluation_id       text        NOT NULL REFERENCES benchmark_evaluations(id) ON DELETE CASCADE,
+    project_id          text,
+    plan_id             text,
+    domain              text,
+    experiment_type     text,
+    insight_text        text        NOT NULL,
+    structured_insight  jsonb       NOT NULL DEFAULT '{}'::jsonb,
+    category_tags       jsonb       NOT NULL DEFAULT '[]'::jsonb,
+    applies_to          text,
+    confidence          numeric,
+    embedding           jsonb,
+    created_at          timestamptz NOT NULL DEFAULT now()
+  );
+
+  CREATE INDEX IF NOT EXISTS benchmark_insights_relevance_idx
+    ON benchmark_insights (domain, experiment_type, created_at DESC);
 `;
 
 export async function ensureSchema(): Promise<void> {
