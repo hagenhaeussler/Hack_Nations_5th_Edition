@@ -1,5 +1,5 @@
 import { CalendarRange, ExternalLink, MessageCircle, ShieldAlert, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { LoadingScreen } from "@/components/LoadingScreen";
@@ -27,6 +27,7 @@ import {
   type Project,
   type Workflow,
 } from "@/lib/projects";
+import { renderPaperText, stripPaperMarkup } from "@/lib/paperText";
 import { cn } from "@/lib/utils";
 
 type ProjectPageSlug = "calendar" | "statistics" | "literature";
@@ -428,7 +429,7 @@ function ProjectWorkspaceView({
   return (
     <main className="relative flex h-screen min-h-0 flex-col overflow-hidden">
       {showsLiteratureWorkspace ? (
-        <div className="absolute right-6 top-4 z-20">
+        <div className="absolute right-6 top-6 z-20">
           <ViewModeToggle
             viewMode={literatureViewMode}
             onToggle={() =>
@@ -569,7 +570,6 @@ function ResearchGraphPage({
     [project.papers],
   );
   const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
-  const topSimilarity = papers[0]?.similarity ?? 0;
 
   return (
     <ResearchLiteratureView
@@ -577,7 +577,6 @@ function ResearchGraphPage({
       papers={papers}
       viewMode={viewMode}
       selectedPaperId={selectedPaperId}
-      topSimilarity={topSimilarity}
       onSelectPaper={(paper) =>
         setSelectedPaperId((current) => (current === paper.id ? null : paper.id))
       }
@@ -591,7 +590,6 @@ function ResearchLiteratureView({
   papers,
   viewMode,
   selectedPaperId,
-  topSimilarity,
   onSelectPaper,
   action,
 }: {
@@ -599,16 +597,36 @@ function ResearchLiteratureView({
   papers: Paper[];
   viewMode: LiteratureViewMode;
   selectedPaperId: string | null;
-  topSimilarity: number;
   onSelectPaper: (paper: Paper) => void;
   action?: React.ReactNode;
 }) {
   const [detailPaper, setDetailPaper] = useState<Paper | null>(null);
+  const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
 
   const openPaperDetails = (paper: Paper) => {
+    if (detailPaper?.id === paper.id && detailDrawerOpen) {
+      onSelectPaper(paper);
+      setDetailDrawerOpen(false);
+      return;
+    }
+
     if (selectedPaperId !== paper.id) onSelectPaper(paper);
     setDetailPaper(paper);
+    window.requestAnimationFrame(() => setDetailDrawerOpen(true));
   };
+
+  const closePaperDetails = () => {
+    if (detailPaper && selectedPaperId === detailPaper.id) {
+      onSelectPaper(detailPaper);
+    }
+    setDetailDrawerOpen(false);
+  };
+
+  useEffect(() => {
+    if (detailDrawerOpen || !detailPaper) return;
+    const id = window.setTimeout(() => setDetailPaper(null), 220);
+    return () => window.clearTimeout(id);
+  }, [detailDrawerOpen, detailPaper]);
 
   if (papers.length === 0) {
     return (
@@ -631,6 +649,7 @@ function ResearchLiteratureView({
           <div className="h-full min-h-0 rounded-md border border-[color:var(--border-default)] bg-bg-surface p-4 shadow-sm">
             <PaperGraph
               papers={papers}
+              hypothesis={hypothesis}
               selectedPaperId={selectedPaperId}
               onSelect={openPaperDetails}
             />
@@ -641,22 +660,16 @@ function ResearchLiteratureView({
       {viewMode === "papers" ? (
       <aside className="flex min-h-0 flex-col overflow-hidden">
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
-          <header className="mb-3 flex items-end justify-between gap-3">
+          <header className="mb-4">
             <div>
               <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
-                Fetched papers
+                {papers.length} fetched paper{papers.length === 1 ? "" : "s"}
               </p>
               <h3 className="mt-1 font-sans text-[18px] font-medium text-text-primary">
                 Relevance ranked
               </h3>
             </div>
-            <span className="text-[12px] text-text-tertiary">
-              {papers.length} result{papers.length === 1 ? "" : "s"}
-            </span>
           </header>
-          <p className="mb-4 text-[12.5px] text-text-secondary">
-            Ordered by semantic relevance. Top match: {Math.round(topSimilarity * 100)}%.
-          </p>
           <PaperList
             hypothesis={hypothesis}
             papers={papers}
@@ -672,13 +685,14 @@ function ResearchLiteratureView({
         <PaperDetailDrawer
           paper={detailPaper}
           hypothesis={hypothesis}
-          onClose={() => setDetailPaper(null)}
+          isOpen={detailDrawerOpen}
+          onClose={closePaperDetails}
         />
       ) : null}
 
       {action ? (
         <div className="pointer-events-none absolute bottom-6 left-1/2 z-20 -translate-x-1/2">
-          <div className="pointer-events-auto rounded-full bg-bg-surface/95 p-2 shadow-lg ring-1 ring-[color:var(--border-default)] backdrop-blur">
+          <div className="pointer-events-auto rounded-md bg-bg-surface/95 p-2 shadow-lg ring-1 ring-[color:var(--border-default)] backdrop-blur">
             {action}
           </div>
         </div>
@@ -699,7 +713,7 @@ function ViewModeToggle({
     <button
       type="button"
       onClick={onToggle}
-      className="inline-flex items-center rounded-full border border-[color:var(--border-default)] bg-bg-surface px-4 py-2 text-[12px] font-medium text-text-primary shadow-sm hover:bg-bg-hover"
+      className="inline-flex items-center rounded-sm border border-[color:var(--border-default)] bg-bg-surface px-4 py-2 text-[12px] font-medium text-text-primary shadow-sm transition-colors duration-[var(--duration-fast)] hover:bg-bg-hover"
       aria-label={nextLabel}
     >
       {nextLabel}
@@ -710,32 +724,70 @@ function ViewModeToggle({
 function PaperDetailDrawer({
   paper,
   hypothesis,
+  isOpen,
   onClose,
 }: {
   paper: Paper;
   hypothesis: string;
+  isOpen: boolean;
   onClose: () => void;
 }) {
+  const drawerRef = useRef<HTMLElement | null>(null);
   const [showPdfPreview, setShowPdfPreview] = useState(false);
   const graphLinkCount =
     (paper.referencedPaperIds?.length ?? 0) + (paper.relatedPaperIds?.length ?? 0);
   const relevanceExplanation = buildPaperRelevanceExplanation(paper, hypothesis);
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const drawer = drawerRef.current;
+      if (!drawer || !(event.target instanceof Node)) return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-paper-card='true']")
+      ) {
+        return;
+      }
+      if (!drawer.contains(event.target)) onClose();
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [isOpen, onClose]);
+
   return (
-    <aside className="absolute inset-y-0 right-0 z-30 flex w-full max-w-[440px] flex-col border-l border-[color:var(--border-default)] bg-bg-primary shadow-2xl">
+    <aside
+      ref={drawerRef}
+      className={cn(
+        "absolute inset-y-0 right-0 z-30 flex w-full max-w-[440px] flex-col",
+        "border-l border-[color:var(--border-default)] bg-bg-primary shadow-2xl",
+        "transform-gpu transition-transform duration-200 ease-in-out will-change-transform",
+        isOpen ? "translate-x-0" : "translate-x-full",
+      )}
+    >
       <header className="flex items-start justify-between gap-4 border-b border-[color:var(--border-default)] px-5 py-4">
         <div className="min-w-0">
           <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
             Paper details
           </p>
           <h3 className="mt-1 line-clamp-3 font-sans text-[18px] font-medium leading-[1.25] text-text-primary">
-            {paper.title}
+            {renderPaperText(paper.title)}
           </h3>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="rounded-full p-1.5 text-text-tertiary hover:bg-bg-hover hover:text-text-primary"
+          className="rounded-sm p-1.5 text-text-tertiary transition-colors duration-[var(--duration-fast)] hover:bg-bg-hover hover:text-text-primary"
           aria-label="Close paper details"
         >
           <X size={17} strokeWidth={1.75} />
@@ -766,7 +818,7 @@ function PaperDetailDrawer({
           </p>
           {paper.novelty_relation ? (
             <p className="mt-2 text-[13px] leading-[1.6] text-text-secondary">
-              {paper.novelty_relation}
+              {renderPaperText(paper.novelty_relation)}
             </p>
           ) : null}
         </section>
@@ -807,14 +859,14 @@ function PaperDetailDrawer({
             Abstract
           </p>
           <p className="mt-1 text-[13px] leading-[1.65] text-text-secondary">
-            {paper.abstract}
+            {renderPaperText(paper.abstract)}
           </p>
         </section>
 
         {paper.pdfUrl && showPdfPreview ? (
           <section className="mt-4 overflow-hidden rounded-md border border-[color:var(--border-default)] bg-bg-surface">
             <iframe
-              title={`PDF preview for ${paper.title}`}
+              title={`PDF preview for ${stripPaperMarkup(paper.title)}`}
               src={paper.pdfUrl}
               className="h-[420px] w-full"
             />
@@ -869,7 +921,6 @@ function LiteratureTab({
       papers={papers}
       viewMode={viewMode}
       selectedPaperId={selectedPaperId}
-      topSimilarity={papers[0]?.similarity ?? 0}
       onSelectPaper={(paper) =>
         setSelectedPaperId((current) => (current === paper.id ? null : paper.id))
       }
@@ -886,7 +937,7 @@ function BuildTimelineButton({ onGenerate, large = false }: { onGenerate: () => 
         "inline-flex items-center gap-1.5 bg-accent font-medium text-white shadow-sm",
         "transition-colors duration-[var(--duration-fast)] hover:bg-accent-hover",
         large
-          ? "rounded-full px-6 py-3 text-[15px]"
+          ? "rounded-sm px-6 py-3 text-[15px]"
           : "rounded-sm px-3.5 py-1.5 text-[13px]",
       )}
     >

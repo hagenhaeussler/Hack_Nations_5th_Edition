@@ -55,10 +55,6 @@ const EVIDENCE_FIELDS = [
   ["citationsToPaper", "Citations to paper"],
   ["validationCriteria", "Validation criteria"],
 ] as const;
-const GRAPH_ID_FIELDS = [
-  ["parentIds", "Parent IDs"],
-  ["childrenIds", "Children IDs"],
-] as const;
 
 interface WorkflowNodeDetailPanelProps {
   data: WorkflowNodeData;
@@ -78,6 +74,8 @@ interface Draft {
   citationsToPaper: string;
   procedure: string;
   validationCriteria: string;
+  resourceSummary: string;
+  evidenceSummary: string;
   startDate: string;
   parentIds: string;
   childrenIds: string;
@@ -120,13 +118,15 @@ function dataToDraft(data: WorkflowNodeData): Draft {
     experts: joinLines(data.experts ?? []),
     citationsToPaper: joinLines(data.citationsToPaper ?? []),
     validationCriteria: joinLines(data.validationCriteria ?? legacy.checklist ?? []),
+    resourceSummary: typeof data.resourceSummary === "string" ? data.resourceSummary : "",
+    evidenceSummary: typeof data.evidenceSummary === "string" ? data.evidenceSummary : "",
     parentIds: joinLines(data.parentIds ?? []),
     childrenIds: joinLines(data.childrenIds ?? []),
   };
 }
 
-function draftToData(draft: Draft): WorkflowNodeData {
-  return {
+function draftToData(draft: Draft, previousData: WorkflowNodeData): WorkflowNodeData {
+  const next: WorkflowNodeData = {
     ...draft,
     status: draft.status ?? "upcoming",
     icon: draft.icon ?? "beaker",
@@ -139,6 +139,20 @@ function draftToData(draft: Draft): WorkflowNodeData {
     parentIds: splitLines(draft.parentIds),
     childrenIds: splitLines(draft.childrenIds),
   };
+
+  if (draft.resourceSummary.trim() || typeof previousData.resourceSummary === "string") {
+    next.resourceSummary = draft.resourceSummary;
+  } else {
+    delete next.resourceSummary;
+  }
+
+  if (draft.evidenceSummary.trim() || typeof previousData.evidenceSummary === "string") {
+    next.evidenceSummary = draft.evidenceSummary;
+  } else {
+    delete next.evidenceSummary;
+  }
+
+  return next;
 }
 
 export function WorkflowNodeDetailPanel({
@@ -208,7 +222,7 @@ export function WorkflowNodeDetailPanel({
   async function handleSave() {
     setSaving(true);
     try {
-      await onChange(draftToData(JSON.parse(serializedDraft) as Draft));
+      await onChange(draftToData(JSON.parse(serializedDraft) as Draft, data));
       setDirty(false);
     } finally {
       setSaving(false);
@@ -302,6 +316,11 @@ export function WorkflowNodeDetailPanel({
         </Section>
 
         <Section title="Resources">
+          <TextField
+            label="Resource summary"
+            value={draft.resourceSummary}
+            onChange={(value) => updateField("resourceSummary", value)}
+          />
           {RESOURCE_FIELDS.map(([field, label]) => (
             <TextAreaField
               key={field}
@@ -325,6 +344,11 @@ export function WorkflowNodeDetailPanel({
         </Section>
 
         <Section title="Evidence">
+          <TextField
+            label="Evidence summary"
+            value={draft.evidenceSummary}
+            onChange={(value) => updateField("evidenceSummary", value)}
+          />
           {EVIDENCE_FIELDS.map(([field, label]) => (
             <TextAreaField
               key={field}
@@ -335,16 +359,6 @@ export function WorkflowNodeDetailPanel({
           ))}
         </Section>
 
-        <Section title="Graph IDs">
-          {GRAPH_ID_FIELDS.map(([field, label]) => (
-            <TextAreaField
-              key={field}
-              label={label}
-              value={draft[field]}
-              onChange={(value) => updateField(field, value)}
-            />
-          ))}
-        </Section>
       </div>
 
       <footer className="flex items-center justify-between gap-3 border-t border-[color:var(--border-default)] px-6 py-3">
