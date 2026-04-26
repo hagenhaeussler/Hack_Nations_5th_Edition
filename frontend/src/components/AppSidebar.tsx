@@ -7,6 +7,7 @@ import {
   FolderKanban,
   CalendarRange,
   MoreHorizontal,
+  PackageSearch,
   PenSquare,
   Share2,
   UserRound,
@@ -93,6 +94,11 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
           to: `/projects/${projectId}/literature`,
           label: "Literature",
           icon: BookOpen,
+        },
+        {
+          to: `/projects/${projectId}/resources`,
+          label: "Resources",
+          icon: PackageSearch,
         },
       ]
     : PRIMARY_NAV;

@@ -16,8 +16,8 @@ import { ProjectsListPage } from "@/pages/ProjectsListPage";
  *   /                         → LandingPage          (prompt + past projects)
  *   /projects                 → ProjectsListPage     (all saved projects)
  *   /projects/:id             → redirects to a project subpage
- *   /projects/:id/:page       → ProjectPage          (graph / statistics /
- *                                                     literature)
+ *   /projects/:id/:page       → ProjectPage          (calendar / statistics /
+ *                                                     literature / resources)
  *   /lab-settings             → LabSettingsPage
  *   /personal-settings        → PersonalSettingsPage
  *

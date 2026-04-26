@@ -6,6 +6,7 @@ import { LoadingScreen } from "@/components/LoadingScreen";
 import { CalendarView } from "@/components/calendar/CalendarView";
 import { PaperGraph } from "@/components/PaperGraph";
 import { PaperList } from "@/components/PaperList";
+import { ResourcesView } from "@/components/resources/ResourcesView";
 import { RiskAnalyzerModal } from "@/components/risk/RiskAnalyzerModal";
 import { StatisticsView } from "@/components/statistics/StatisticsView";
 import {
@@ -29,11 +30,16 @@ import {
 } from "@/lib/projects";
 import { cn } from "@/lib/utils";
 
-type ProjectPageSlug = "calendar" | "statistics" | "literature";
+type ProjectPageSlug = "calendar" | "statistics" | "literature" | "resources";
 type LiteratureViewMode = "graph" | "papers";
 
 function isProjectPageSlug(value: string | undefined): value is ProjectPageSlug {
-  return value === "calendar" || value === "statistics" || value === "literature";
+  return (
+    value === "calendar" ||
+    value === "statistics" ||
+    value === "literature" ||
+    value === "resources"
+  );
 }
 
 function sameJsonValue(left: unknown, right: unknown): boolean {
@@ -45,7 +51,7 @@ function sameJsonValue(left: unknown, right: unknown): boolean {
  *
  * The view is driven by `project.status`:
  *   - `research-ready`: literature panel with a CTA to generate the calendar.
- *   - `ready`: tabbed calendar / statistics / literature view.
+ *   - `ready`: tabbed calendar / statistics / literature / resources view.
  *   - `researching` / `generating`: loading screen (rare — only when a stale
  *     status is fetched mid-flight; the normal loading lives at the call
  *     site).
@@ -403,10 +409,13 @@ function ProjectWorkspaceView({
       }
       if (
         action.type === "open_report_section" ||
-        action.type === "open_purchase_list" ||
         action.type === "open_risk_summary"
       ) {
         navigate(`/projects/${project.id}/statistics`);
+        return;
+      }
+      if (action.type === "open_purchase_list") {
+        navigate(`/projects/${project.id}/resources`);
         return;
       }
       if (action.type === "open_citation") {
@@ -528,6 +537,12 @@ function ProjectWorkspaceView({
             finalPlan={project.finalPlan}
             onAnalyzeRisks={planId ? () => setRiskOpen(true) : undefined}
           />
+        ) : (
+          <GeneratePlaceholder onGenerate={onGenerate} />
+        )
+      ) : page === "resources" ? (
+        workflow ? (
+          <ResourcesView project={project} />
         ) : (
           <GeneratePlaceholder onGenerate={onGenerate} />
         )
