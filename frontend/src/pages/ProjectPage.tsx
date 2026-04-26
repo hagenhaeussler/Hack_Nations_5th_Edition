@@ -439,7 +439,7 @@ function ProjectWorkspaceView({
       ) : null}
 
       {learningNotice ? (
-        <div className="pointer-events-none absolute right-6 top-24 z-20 rounded-md border border-[color:var(--border-default)] bg-bg-surface px-3 py-2 text-[12px] font-medium text-text-primary shadow-md">
+        <div className="pointer-events-none fixed bottom-6 right-6 z-50 max-w-[320px] rounded-md border border-[color:var(--border-default)] bg-bg-surface px-3 py-2 text-[12px] font-medium text-text-primary shadow-md">
           {learningNotice}
         </div>
       ) : null}

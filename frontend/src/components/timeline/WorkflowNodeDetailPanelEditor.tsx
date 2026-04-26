@@ -40,12 +40,6 @@ const ICON_MAP: Record<WorkflowIconKey, LucideIcon> = {
   "clipboard-check": ClipboardCheck,
 };
 
-const STATUS_LABEL: Record<WorkflowStatus, string> = {
-  done: "Completed",
-  active: "In progress",
-  upcoming: "Upcoming",
-};
-
 const ARRAY_FIELDS = [
   ["people", "People"],
   ["equipment", "Equipment"],
@@ -53,6 +47,17 @@ const ARRAY_FIELDS = [
   ["experts", "Experts"],
   ["citationsToPaper", "Citations to paper"],
   ["validationCriteria", "Validation criteria"],
+] as const;
+
+const RESOURCE_FIELDS = ARRAY_FIELDS.slice(0, 3);
+const EXPERT_FIELDS = [["experts", "Experts"]] as const;
+const EVIDENCE_FIELDS = [
+  ["citationsToPaper", "Citations to paper"],
+  ["validationCriteria", "Validation criteria"],
+] as const;
+const GRAPH_ID_FIELDS = [
+  ["parentIds", "Parent IDs"],
+  ["childrenIds", "Children IDs"],
 ] as const;
 
 interface WorkflowNodeDetailPanelProps {
@@ -236,18 +241,9 @@ export function WorkflowNodeDetailPanel({
         </span>
 
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <StatusDot status={status} />
-            <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-text-tertiary">
-              {STATUS_LABEL[status]}
-            </span>
-          </div>
-          <h2 className="mt-1 text-[18px] font-semibold leading-[1.3] tracking-[-0.01em] text-text-primary">
+          <h2 className="text-[18px] font-semibold leading-[1.3] tracking-[-0.01em] text-text-primary">
             {draft.stepName || "Untitled step"}
           </h2>
-          <p className="mt-1 text-[13px] leading-[1.55] text-text-secondary">
-            {draft.startDate} · {draft.timeEstimate}
-          </p>
         </div>
 
         <button
@@ -264,9 +260,9 @@ export function WorkflowNodeDetailPanel({
       </header>
 
       <div className="flex-1 overflow-y-auto px-6 py-5">
-        <Section title="Step">
+        <Section title="Basics">
           <TextField
-            label="Step Name"
+            label="Title"
             value={draft.stepName}
             onChange={(value) => updateField("stepName", value)}
           />
@@ -298,6 +294,7 @@ export function WorkflowNodeDetailPanel({
         <Section title="Procedure">
           <TextAreaField
             label="Procedure"
+            hideLabel
             minRows={5}
             value={draft.procedure}
             onChange={(value) => updateField("procedure", value)}
@@ -305,7 +302,7 @@ export function WorkflowNodeDetailPanel({
         </Section>
 
         <Section title="Resources">
-          {ARRAY_FIELDS.slice(0, 3).map(([field, label]) => (
+          {RESOURCE_FIELDS.map(([field, label]) => (
             <TextAreaField
               key={field}
               label={label}
@@ -315,8 +312,20 @@ export function WorkflowNodeDetailPanel({
           ))}
         </Section>
 
+        <Section title="Experts">
+          {EXPERT_FIELDS.map(([field, label]) => (
+            <TextAreaField
+              key={field}
+              label={label}
+              hideLabel
+              value={draft[field]}
+              onChange={(value) => updateField(field, value)}
+            />
+          ))}
+        </Section>
+
         <Section title="Evidence">
-          {ARRAY_FIELDS.slice(3, 6).map(([field, label]) => (
+          {EVIDENCE_FIELDS.map(([field, label]) => (
             <TextAreaField
               key={field}
               label={label}
@@ -327,7 +336,7 @@ export function WorkflowNodeDetailPanel({
         </Section>
 
         <Section title="Graph IDs">
-          {ARRAY_FIELDS.slice(6).map(([field, label]) => (
+          {GRAPH_ID_FIELDS.map(([field, label]) => (
             <TextAreaField
               key={field}
               label={label}
@@ -414,18 +423,26 @@ function TextAreaField({
   value,
   onChange,
   minRows = 3,
+  hideLabel = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   minRows?: number;
+  hideLabel?: boolean;
 }) {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-text-tertiary">
+      <span
+        className={cn(
+          "text-[11px] font-medium uppercase tracking-[0.06em] text-text-tertiary",
+          hideLabel && "sr-only",
+        )}
+      >
         {label}
       </span>
       <textarea
+        aria-label={hideLabel ? label : undefined}
         value={value}
         rows={minRows}
         onChange={(event) => onChange(event.currentTarget.value)}
@@ -439,16 +456,3 @@ function TextAreaField({
   );
 }
 
-function StatusDot({ status }: { status: WorkflowStatus }) {
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "block h-1.5 w-1.5 rounded-full",
-        status === "done" && "bg-text-tertiary",
-        status === "active" && "bg-accent",
-        status === "upcoming" && "border border-[color:var(--border-strong)]",
-      )}
-    />
-  );
-}

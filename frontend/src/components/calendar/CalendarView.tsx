@@ -1,12 +1,8 @@
 import {
-  CalendarDays,
   Check,
-  Clock,
-  DollarSign,
   Package,
   ShieldAlert,
   Wrench,
-  Users,
 } from "lucide-react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -26,6 +22,10 @@ const DAYS_PER_WEEK = 7;
  */
 const DAY_WIDTH_PX = 240;
 const CARD_ASPECT_HEIGHT_RATIO = 1.414;
+const CARD_HORIZONTAL_GUTTER_PX = 16;
+const TASK_CARD_HEIGHT_PX = Math.round(
+  (DAY_WIDTH_PX - CARD_HORIZONTAL_GUTTER_PX) * CARD_ASPECT_HEIGHT_RATIO,
+);
 
 /** Minimum visible span so empty/short plans still feel like a calendar. */
 const MIN_TIMELINE_DAYS = 14;
@@ -38,6 +38,7 @@ const CLICK_DRAG_THRESHOLD = 4;
 
 /** Short GPU-only easing used when a released card settles into its snapped slot. */
 const CARD_MOVE_TRANSITION = "transform 140ms ease-out";
+const CARD_RESIZE_TRANSITION = "transform 140ms ease-out, width 140ms ease-out";
 
 /** Default day count for a task, derived from its `timeEstimate` string. */
 function durationForTask(task: WorkflowNode): number {
@@ -185,13 +186,6 @@ function placeTasksOnTimeline(
   return placed;
 }
 
-/**
- * Live preview for resize drags. Card movement is intentionally handled
- * imperatively on the dragged DOM node so pointer movement never rerenders the
- * calendar grid.
- */
-type DragPreview = { kind: "resize"; taskId: string; startCol: number; span: number };
-
 interface CalendarViewProps {
   workflow?: Workflow;
   /**
@@ -238,7 +232,6 @@ export function CalendarView({
   const [taskStatuses, setTaskStatuses] = useState<
     Record<string, NonNullable<WorkflowNode["data"]["status"]>>
   >({});
-  const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
 
   // Drop optimistic overrides whose persisted value now matches (i.e. the API
   // write has completed and flowed back as props).
@@ -310,13 +303,8 @@ export function CalendarView({
       const dur = Math.max(1, taskDurations[node.id] ?? durationForTask(node));
       return Math.max(max, dayOffset(planStart, parsed) + dur);
     }, MIN_TIMELINE_DAYS);
-    // While the user is actively resizing past the current end, pad the grid
-    // out live so the card stays inside the rendered columns mid-drag.
-    if (dragPreview?.kind === "resize") {
-      farthest = Math.max(farthest, dragPreview.startCol + dragPreview.span - 1);
-    }
     return Math.max(MIN_TIMELINE_DAYS, Math.ceil(farthest / DAYS_PER_WEEK) * DAYS_PER_WEEK);
-  }, [dragPreview, planStart, taskDurations, taskStartDates, workflow?.nodes]);
+  }, [planStart, taskDurations, taskStartDates, workflow?.nodes]);
 
   const timelineDays = useMemo(
     () => Array.from({ length: totalDays }, (_, index) => addDays(planStart, index)),
@@ -379,65 +367,72 @@ export function CalendarView({
       if (!gridRef.current) return;
 
       const handle = event.currentTarget;
+      const card = handle.parentElement;
+      if (!card) return;
+
       const colWidth = DAY_WIDTH_PX;
       const initialStartCol = placed.startCol;
       const initialSpan = placed.span;
-      const initialEndColInclusive = initialStartCol + initialSpan - 1;
+      const baseWidth = card.getBoundingClientRect().width;
       const startX = event.clientX;
-
-      let preview: Extract<DragPreview, { kind: "resize" }> = {
-        kind: "resize",
-        taskId: placed.task.id,
-        startCol: initialStartCol,
-        span: initialSpan,
-      };
-      setDragPreview(preview);
-      handle.setPointerCapture(event.pointerId);
+      let didResize = false;
       let frame = 0;
+      let currentX = 0;
+      let currentWidth = baseWidth;
 
-      const publishPreview = () => {
+      const minTranslate =
+        edge === "left"
+          ? (1 - initialStartCol) * colWidth
+          : -(initialSpan - 1) * colWidth;
+      const maxTranslate =
+        edge === "left"
+          ? (initialSpan - 1) * colWidth
+          : (MAX_TASK_SPAN_DAYS - initialSpan) * colWidth;
+
+      const resetCardStyles = () => {
+        card.style.transform = "";
+        card.style.width = "";
+        card.style.transition = "";
+        card.style.willChange = "";
+        card.style.zIndex = "";
+        card.style.boxShadow = "";
+      };
+
+      const paintCard = (x: number, width: number) => {
+        card.style.transform = x ? `translate3d(${x}px, 0, 0)` : "";
+        card.style.width = `${width}px`;
+      };
+
+      const schedulePaint = () => {
         if (frame) return;
         frame = window.requestAnimationFrame(() => {
           frame = 0;
-          setDragPreview(preview);
+          paintCard(currentX, currentWidth);
         });
       };
 
+      handle.setPointerCapture(event.pointerId);
+
       const handleMove = (ev: PointerEvent) => {
-        const colDelta = Math.round((ev.clientX - startX) / colWidth);
-        if (edge === "right") {
-          // Allow growing well past the rendered timeline — the parent will
-          // recompute `totalDays` once the duration is persisted, padding the
-          // grid out so the card stays in view.
-          const maxEndCol = initialStartCol + MAX_TASK_SPAN_DAYS - 1;
-          const newEndColInclusive = clamp(
-            initialEndColInclusive + colDelta,
-            initialStartCol,
-            maxEndCol,
-          );
-          preview = {
-            kind: "resize",
-            taskId: placed.task.id,
-            startCol: initialStartCol,
-            span: newEndColInclusive - initialStartCol + 1,
-          };
-        } else {
-          // Left edge: keep the right edge pinned and slide the start. We
-          // intentionally clamp the start to day 1 so the underlying plan
-          // start (which drives the whole grid) never moves during a drag.
-          const newStartCol = clamp(
-            initialStartCol + colDelta,
-            1,
-            initialEndColInclusive,
-          );
-          preview = {
-            kind: "resize",
-            taskId: placed.task.id,
-            startCol: newStartCol,
-            span: initialEndColInclusive - newStartCol + 1,
-          };
+        const dx = ev.clientX - startX;
+        if (!didResize && Math.abs(dx) < CLICK_DRAG_THRESHOLD) return;
+        if (!didResize) {
+          didResize = true;
+          card.style.transition = "none";
+          card.style.willChange = "transform,width";
+          card.style.zIndex = "20";
+          card.style.boxShadow = "var(--shadow-lg)";
         }
-        publishPreview();
+
+        if (edge === "right") {
+          const clampedDx = clamp(dx, minTranslate, maxTranslate);
+          currentX = 0;
+          currentWidth = Math.max(1, baseWidth + clampedDx);
+        } else {
+          currentX = clamp(dx, minTranslate, maxTranslate);
+          currentWidth = Math.max(1, baseWidth - currentX);
+        }
+        schedulePaint();
       };
 
       const handleUp = () => {
@@ -451,40 +446,76 @@ export function CalendarView({
           // ignore — pointer may already have been released
         }
 
-        const { startCol, span } = preview;
-        setDragPreview(null);
+        if (!didResize) {
+          resetCardStyles();
+          return;
+        }
+
+        const colDelta =
+          edge === "right"
+            ? Math.round((currentWidth - baseWidth) / colWidth)
+            : Math.round(currentX / colWidth);
+        const finalStartCol =
+          edge === "left"
+            ? clamp(initialStartCol + colDelta, 1, initialStartCol + initialSpan - 1)
+            : initialStartCol;
+        const finalSpan =
+          edge === "left"
+            ? initialSpan - (finalStartCol - initialStartCol)
+            : clamp(initialSpan + colDelta, 1, MAX_TASK_SPAN_DAYS);
+        const snappedX = (finalStartCol - initialStartCol) * colWidth;
+        const snappedWidth = Math.max(
+          1,
+          baseWidth + (finalSpan - initialSpan) * colWidth,
+        );
         const previousRects = measureTaskRects();
-        const durationChanged = span !== initialSpan;
+        const durationChanged = finalSpan !== initialSpan;
         const newStartDate =
-          edge === "left" && startCol !== initialStartCol
-            ? formatDate(addDays(planStart, startCol - 1))
+          edge === "left" && finalStartCol !== initialStartCol
+            ? formatDate(addDays(planStart, finalStartCol - 1))
             : null;
         const startDateChanged =
           Boolean(newStartDate) && placed.task.data.startDate !== newStartDate;
 
-        // Apply the optimistic local span immediately so the card stays its
-        // new size while the API round-trip resolves.
-        if (durationChanged || startDateChanged) {
+        if (!durationChanged && !startDateChanged) {
+          card.style.transition = CARD_RESIZE_TRANSITION;
+          paintCard(0, baseWidth);
+          window.setTimeout(resetCardStyles, 160);
+          return;
+        }
+
+        let committed = false;
+        const commitSnappedSize = () => {
+          if (committed) return;
+          committed = true;
+          card.removeEventListener("transitionend", commitSnappedSize);
+
           flushSync(() => {
             if (durationChanged) {
-              setTaskDurations((prev) => ({ ...prev, [placed.task.id]: span }));
+              setTaskDurations((prev) => ({ ...prev, [placed.task.id]: finalSpan }));
             }
             if (startDateChanged && newStartDate) {
               setTaskStartDates((prev) => ({ ...prev, [placed.task.id]: newStartDate }));
             }
           });
+          resetCardStyles();
           animateStackingChanges(previousRects, placed.task.id);
-        }
 
-        if (durationChanged) {
-          onTaskDurationChange?.(
-            placed.task.id,
-            formatDaysAsTimeEstimate(span),
-          );
-        }
-        if (startDateChanged && newStartDate) {
-          onTaskMove(placed.task.id, newStartDate);
-        }
+          if (durationChanged) {
+            onTaskDurationChange?.(
+              placed.task.id,
+              formatDaysAsTimeEstimate(finalSpan),
+            );
+          }
+          if (startDateChanged && newStartDate) {
+            onTaskMove(placed.task.id, newStartDate);
+          }
+        };
+
+        card.style.transition = CARD_RESIZE_TRANSITION;
+        paintCard(snappedX, snappedWidth);
+        card.addEventListener("transitionend", commitSnappedSize, { once: true });
+        window.setTimeout(commitSnappedSize, 180);
       };
 
       handle.addEventListener("pointermove", handleMove);
@@ -745,25 +776,12 @@ export function CalendarView({
                 </div>
               ) : (
                 placedTasks.map((placed) => {
-                  const override =
-                    dragPreview && dragPreview.taskId === placed.task.id ? dragPreview : null;
-                  // Resize drags rewrite the grid placement. Move drags are
-                  // handled directly on the dragged card DOM node to keep the
-                  // rest of the calendar out of the pointer-move render loop.
-                  const startCol =
-                    override?.kind === "resize" ? override.startCol : placed.startCol;
-                  const span =
-                    override?.kind === "resize" ? override.span : placed.span;
-                  const startDate = formatDate(addDays(planStart, startCol - 1));
                   return (
                     <TaskCard
                       key={placed.task.id}
                       task={placed.task}
                       selected={selectedTaskId === placed.task.id}
-                      isResizing={override?.kind === "resize"}
                       completed={(taskStatuses[placed.task.id] ?? placed.task.data.status) === "done"}
-                      span={span}
-                      startDate={startDate}
                       onCompletedChange={(completed) => {
                         const status = completed ? "done" : "upcoming";
                         setTaskStatuses((prev) => ({
@@ -772,12 +790,12 @@ export function CalendarView({
                         }));
                         onTaskStatusChange?.(placed.task.id, status);
                       }}
-                      onMoveStart={(ev) => startMove(ev, placed, startCol, span)}
+                      onMoveStart={(ev) => startMove(ev, placed, placed.startCol, placed.span)}
                       onResizeStart={(edge, ev) =>
-                        startResize(ev, { ...placed, startCol, span }, edge)
+                        startResize(ev, placed, edge)
                       }
                       style={{
-                        gridColumn: `${startCol} / span ${span}`,
+                        gridColumn: `${placed.startCol} / span ${placed.span}`,
                         gridRowStart: placed.row,
                       }}
                     />
@@ -795,10 +813,7 @@ export function CalendarView({
 interface TaskCardProps {
   task: WorkflowNode;
   selected: boolean;
-  isResizing: boolean;
   completed: boolean;
-  span: number;
-  startDate: string;
   onCompletedChange: (completed: boolean) => void;
   onMoveStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onResizeStart: (edge: "left" | "right", event: ReactPointerEvent<HTMLButtonElement>) => void;
@@ -808,10 +823,7 @@ interface TaskCardProps {
 function TaskCard({
   task,
   selected,
-  isResizing,
   completed,
-  span,
-  startDate,
   onCompletedChange,
   onMoveStart,
   onResizeStart,
@@ -819,12 +831,6 @@ function TaskCard({
 }: TaskCardProps) {
   const warning = hasResourceWarning(task);
   const risky = hasRisk(task);
-  const peopleLabel =
-    task.data.people.length > 0
-      ? `${task.data.people.slice(0, 2).join(", ")}${
-          task.data.people.length > 2 ? ` +${task.data.people.length - 2}` : ""
-        }`
-      : "No people assigned";
   const equipmentCount = task.data.equipment.length;
   const materialCount = task.data.materials.length;
   const validationCount = task.data.validationCriteria.length;
@@ -832,13 +838,12 @@ function TaskCard({
   return (
     <article
       data-calendar-task-id={task.id}
-      style={{ ...style, aspectRatio: `1 / ${CARD_ASPECT_HEIGHT_RATIO}` }}
+      style={{ ...style, height: TASK_CARD_HEIGHT_PX }}
       className={cn(
         "relative ml-1 mr-3 flex min-h-0 flex-col overflow-hidden rounded-md border bg-bg-surface shadow-sm transition-[box-shadow,border-color]",
         selected
           ? "border-[color:var(--accent)]"
           : "border-[color:var(--border-default)] hover:border-[color:var(--accent)]",
-        isResizing && "ring-1 ring-[color:var(--accent)]/40",
       )}
     >
       <button
@@ -849,7 +854,6 @@ function TaskCard({
           "absolute left-0 top-0 z-10 h-full w-2 cursor-ew-resize touch-none",
           "rounded-l-md bg-transparent transition-colors",
           "hover:bg-[color:var(--accent)]/30",
-          isResizing && "bg-[color:var(--accent)]/40",
         )}
       />
       <button
@@ -860,7 +864,6 @@ function TaskCard({
           "absolute right-0 top-0 z-10 h-full w-2 cursor-ew-resize touch-none",
           "rounded-r-md bg-transparent transition-colors",
           "hover:bg-[color:var(--accent)]/30",
-          isResizing && "bg-[color:var(--accent)]/40",
         )}
       />
 
@@ -881,7 +884,7 @@ function TaskCard({
           onCompletedChange(!completed);
         }}
         className={cn(
-          "absolute right-3 top-3 z-20 flex h-5 w-5 items-center justify-center rounded-sm border transition-colors",
+          "absolute right-4 top-4 z-20 flex h-5 w-5 items-center justify-center rounded-sm border transition-colors",
           completed
             ? "border-[color:var(--accent)] bg-[color:var(--accent)] text-white"
             : "border-[color:var(--border-strong)] bg-bg-surface text-transparent hover:border-[color:var(--accent)]",
@@ -896,72 +899,57 @@ function TaskCard({
         aria-label={`${task.data.stepName}, drag to reschedule`}
         onPointerDown={onMoveStart}
         className={cn(
-          "flex h-full w-full select-none flex-col px-3 py-3 text-left",
+          "flex h-full w-full select-none flex-col px-4 py-4 text-left",
           "touch-none",
           "cursor-grab active:cursor-grabbing",
           "focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]/40",
         )}
       >
         <div>
-          <h4 className="pr-7 text-[13px] font-semibold leading-[1.3] text-text-primary line-clamp-2">
+          <h4 className="pr-9 text-[13px] font-semibold leading-[1.35] text-text-primary line-clamp-2">
             {task.data.stepName}
           </h4>
         </div>
 
-        <p className="mt-2 min-h-0 flex-1 rounded-md bg-bg-primary/60 px-2 py-2 text-[12px] leading-[1.45] text-text-secondary line-clamp-[8]">
+        <p className="mt-3 min-h-0 flex-1 rounded-md bg-bg-primary/60 px-3 py-3 text-[12px] leading-[1.55] text-text-secondary line-clamp-[7]">
           {task.data.procedure || "No procedure supplied."}
         </p>
 
-        <div className="mt-2 grid grid-cols-2 gap-1.5 text-[10.5px] leading-[1.25] text-text-tertiary">
-          <span className="inline-flex min-w-0 items-center gap-1 rounded-sm bg-bg-hover/70 px-1.5 py-1">
-            <CalendarDays size={11} strokeWidth={1.6} />
-            <span className="truncate">
-              {span === 1 ? "1 day" : `${span} days`} · {startDate}
-            </span>
-          </span>
-          <span className="inline-flex min-w-0 items-center gap-1 rounded-sm bg-bg-hover/70 px-1.5 py-1">
-            <Clock size={11} strokeWidth={1.6} />
-            <span className="truncate">{task.data.timeEstimate}</span>
-          </span>
-          <span className="inline-flex min-w-0 items-center gap-1 rounded-sm bg-bg-hover/70 px-1.5 py-1">
-            <DollarSign size={11} strokeWidth={1.6} />
+        <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-[10px] leading-[1.2]">
+          <span
+            className="inline-flex max-w-full items-center gap-1 rounded-full bg-bg-hover px-2.5 py-1 font-medium text-text-tertiary"
+            title={`Estimated cost: ${task.data.price}`}
+          >
             <span className="truncate">{task.data.price}</span>
           </span>
-          <span className="inline-flex min-w-0 items-center gap-1 rounded-sm bg-bg-hover/70 px-1.5 py-1">
-            <Users size={11} strokeWidth={1.6} />
-            <span className="truncate">{peopleLabel}</span>
-          </span>
-        </div>
-
-        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] leading-[1.2]">
           <span
-            className="inline-flex items-center gap-1 rounded-full bg-bg-hover px-2 py-0.5 font-medium text-text-tertiary"
+            className="inline-flex items-center gap-1 rounded-full bg-bg-hover px-2.5 py-1 font-medium text-text-tertiary"
             title={`${equipmentCount} equipment`}
           >
             <Wrench size={11} strokeWidth={1.6} />
             {equipmentCount}
           </span>
           <span
-            className="inline-flex items-center gap-1 rounded-full bg-bg-hover px-2 py-0.5 font-medium text-text-tertiary"
+            className="inline-flex items-center gap-1 rounded-full bg-bg-hover px-2.5 py-1 font-medium text-text-tertiary"
             title={`${materialCount} materials`}
           >
             <Package size={11} strokeWidth={1.6} />
             {materialCount}
           </span>
           <span
-            className="inline-flex items-center gap-1 rounded-full bg-bg-hover px-2 py-0.5 font-medium text-text-tertiary"
+            className="inline-flex items-center gap-1 rounded-full bg-bg-hover px-2.5 py-1 font-medium text-text-tertiary"
             title={`${validationCount} validation checks`}
           >
             <Check size={11} strokeWidth={1.8} />
             {validationCount}
           </span>
           {warning ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-yellow-500/10 px-2 py-0.5 text-[10px] font-medium text-yellow-700">
+            <span className="inline-flex items-center gap-1 rounded-full bg-yellow-500/10 px-2.5 py-1 text-[10px] font-medium text-yellow-700">
               Resource check
             </span>
           ) : null}
           {risky ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-medium text-red-700">
+            <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2.5 py-1 text-[10px] font-medium text-red-700">
               <ShieldAlert size={11} strokeWidth={1.6} />
               Risk
             </span>
