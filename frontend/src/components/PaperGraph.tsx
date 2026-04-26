@@ -1,70 +1,42 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import type { Paper } from "@/lib/papers";
-import { similarityLabel } from "@/lib/papers";
 import { cn } from "@/lib/utils";
 
 interface PaperGraphProps {
-  /** Reserved for future use; the prompt currently isn't rendered in the SVG. */
-  prompt?: string;
   papers: Paper[];
-  /**
-   * Optional controlled selection. When provided, the graph mirrors this id
-   * in addition to its own internal click state, so external lists can drive
-   * the highlighted node.
-   */
   selectedPaperId?: string | null;
   onSelect?: (paper: Paper) => void;
 }
 
 type PaperRelationKind = "citation" | "related";
+type GraphNode = { paper: Paper; x: number; y: number; cluster: number };
 
 /**
- * A small, dependency-free network diagram.
- *
- * Layout:
- * - The user's prompt sits at the centre as an unlabelled accent node.
- * - Each paper orbits the centre on a circle whose radius is inversely
- *   proportional to its similarity (more similar → closer in).
- * - Edge opacity + width also encode similarity.
- *
- * Interaction:
- * - Click a paper node to select it. Selection highlights its edge and
- *   surfaces details in the readout below. Click the same node (or a blank
- *   area of the SVG) to deselect.
- *
- * The viewBox is fixed (480 × 400) and the SVG scales with its container,
- * so this works whether the panel is half-screen or full-screen.
+ * Dependency-free citation graph for fetched papers.
+ * Solid lines are citations among fetched OpenAlex works; dashed lines are
+ * OpenAlex related-work links. Node size encodes relevance.
  */
-export function PaperGraph({
-  prompt: _prompt,
-  papers,
-  selectedPaperId,
-  onSelect,
-}: PaperGraphProps) {
-  const [selectedId, setSelectedId] = useState<string | null>(
-    selectedPaperId ?? null,
-  );
-
-  useEffect(() => {
-    if (selectedPaperId !== undefined) setSelectedId(selectedPaperId);
-  }, [selectedPaperId]);
-
+export function PaperGraph({ papers, selectedPaperId, onSelect }: PaperGraphProps) {
   const layout = useMemo(() => {
-    const centerX = 240;
-    const centerY = 200;
-    const innerRadius = 70;
-    const outerRadius = 160;
+    const centerX = 340;
+    const centerY = 250;
+    const radius = 190;
+    const sorted = [...papers].sort((left, right) => right.similarity - left.similarity);
 
-    return papers.map((paper, idx) => {
-      const angle =
-        (idx / Math.max(papers.length, 1)) * Math.PI * 2 - Math.PI / 2;
-      // Higher similarity → smaller radius (closer to centre).
-      const radius =
-        outerRadius - (paper.similarity - 0.45) * (outerRadius - innerRadius) * 2;
-      const x = centerX + Math.cos(angle) * Math.max(innerRadius, Math.min(outerRadius, radius));
-      const y = centerY + Math.sin(angle) * Math.max(innerRadius, Math.min(outerRadius, radius));
-      return { paper, x, y };
+    return sorted.map<GraphNode>((paper, idx) => {
+      if (idx === 0) {
+        return { paper, x: centerX, y: centerY, cluster: 0 };
+      }
+      const angle = ((idx - 1) / Math.max(sorted.length - 1, 1)) * Math.PI * 2 - Math.PI / 2;
+      const ring = idx <= 6 ? radius * 0.62 : radius;
+      const jitter = (idx % 3) * 18;
+      return {
+        paper,
+        x: centerX + Math.cos(angle) * (ring + jitter),
+        y: centerY + Math.sin(angle) * (ring + jitter),
+        cluster: idx <= 6 ? 1 : 2,
+      };
     });
   }, [papers]);
 
@@ -117,53 +89,43 @@ export function PaperGraph({
     return edges;
   }, [layout]);
 
-  const selected = selectedId
-    ? layout.find((n) => n.paper.id === selectedId)?.paper ?? null
-    : null;
-  const selectedConnectionCount = selected
-    ? paperEdges.filter(
-        (edge) => edge.sourceId === selected.id || edge.targetId === selected.id,
-      ).length
-    : 0;
+  const connectedIds = useMemo(() => {
+    if (!selectedPaperId) return new Set<string>();
+    return new Set(
+      paperEdges
+        .filter((edge) => edge.sourceId === selectedPaperId || edge.targetId === selectedPaperId)
+        .flatMap((edge) => [edge.sourceId, edge.targetId]),
+    );
+  }, [paperEdges, selectedPaperId]);
 
-  const togglePaper = (paper: Paper) => {
-    setSelectedId((curr) => (curr === paper.id ? null : paper.id));
+  const selectPaper = (paper: Paper) => {
     onSelect?.(paper);
   };
 
   return (
-    <div className="flex h-full min-h-[360px] flex-col">
+    <div className="flex h-full min-h-[520px] flex-col">
       <svg
-        viewBox="0 0 480 400"
+        viewBox="0 0 680 500"
         className="min-h-0 w-full flex-1"
         role="img"
-        aria-label="Graph of papers similar to your prompt"
-        onClick={(e) => {
-          // Click on the SVG background (not on a node) deselects.
-          if (e.target === e.currentTarget) setSelectedId(null);
-        }}
+        aria-label="Citation graph of fetched papers"
       >
-        {/* Concentric similarity rings — purely visual scaffolding. */}
-        {[0.55, 0.7, 0.85].map((band) => {
-          const r = 160 - (band - 0.45) * (160 - 70) * 2;
-          return (
-            <circle
-              key={band}
-              cx={240}
-              cy={200}
-              r={Math.max(70, Math.min(160, r))}
-              fill="none"
-              stroke="var(--border-default)"
-              strokeDasharray="2 5"
-              opacity={0.45}
-            />
-          );
-        })}
+        <defs>
+          <marker
+            id="citation-arrow"
+            markerWidth="7"
+            markerHeight="7"
+            refX="6"
+            refY="3.5"
+            orient="auto"
+          >
+            <path d="M0,0 L7,3.5 L0,7 Z" fill="var(--border-strong)" opacity="0.75" />
+          </marker>
+        </defs>
 
-        {/* OpenAlex paper-to-paper citation / related-work relationships. */}
         {paperEdges.map((edge) => {
           const isSelected =
-            selectedId === edge.sourceId || selectedId === edge.targetId;
+            selectedPaperId === edge.sourceId || selectedPaperId === edge.targetId;
           return (
             <line
               key={edge.id}
@@ -171,126 +133,75 @@ export function PaperGraph({
               y1={edge.sourceY}
               x2={edge.targetX}
               y2={edge.targetY}
-              stroke={isSelected ? "var(--accent)" : "var(--border-default)"}
-              strokeOpacity={isSelected ? 0.7 : 0.3}
-              strokeWidth={isSelected ? 1.25 : 0.75}
-              strokeDasharray={edge.kind === "related" ? "4 5" : undefined}
-            />
-          );
-        })}
-
-        {/* Hypothesis-to-paper similarity edges. */}
-        {layout.map(({ paper, x, y }) => {
-          const isSelected = selectedId === paper.id;
-          return (
-            <line
-              key={`edge-${paper.id}`}
-              x1={240}
-              y1={200}
-              x2={x}
-              y2={y}
               stroke={isSelected ? "var(--accent)" : "var(--border-strong)"}
-              strokeOpacity={
-                isSelected ? 0.9 : 0.25 + paper.similarity * 0.55
-              }
-              strokeWidth={isSelected ? 1.5 : 0.5 + paper.similarity * 1.2}
+              strokeOpacity={isSelected ? 0.85 : 0.45}
+              strokeWidth={isSelected ? 1.75 : 1}
+              strokeDasharray={edge.kind === "related" ? "4 5" : undefined}
+              markerEnd={edge.kind === "citation" ? "url(#citation-arrow)" : undefined}
             />
           );
         })}
 
-        {/* Centre node — the hypothesis (unlabelled). */}
-        <circle
-          cx={240}
-          cy={200}
-          r={14}
-          fill="var(--accent)"
-          stroke="var(--accent)"
-          strokeWidth={1.25}
-        />
-        <circle
-          cx={240}
-          cy={200}
-          r={22}
-          fill="none"
-          stroke="var(--accent)"
-          strokeOpacity={0.35}
-          strokeWidth={1}
-        />
+        {paperEdges.length === 0 ? (
+          <text x={340} y={470} textAnchor="middle" fontSize={12} fill="var(--text-tertiary)">
+            No citation links found among the fetched papers yet.
+          </text>
+        ) : null}
 
-        {/* Paper nodes */}
-        {layout.map(({ paper, x, y }) => {
-          const isSelected = selectedId === paper.id;
-          const radius = 8 + paper.similarity * 8;
+        {layout.map(({ paper, x, y, cluster }, index) => {
+          const isSelected = selectedPaperId === paper.id;
+          const isConnected = connectedIds.has(paper.id);
+          const radius = 15 + paper.similarity * 12;
+          const dimmed = selectedPaperId && !isSelected && !isConnected;
           return (
             <g
               key={paper.id}
               className="cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation();
-                togglePaper(paper);
+                selectPaper(paper);
               }}
             >
-              {/* hit target */}
-              <circle cx={x} cy={y} r={radius + 8} fill="transparent" />
+              <circle cx={x} cy={y} r={radius + 10} fill="transparent" />
               <circle
                 cx={x}
                 cy={y}
                 r={radius}
-                fill={isSelected ? "var(--accent)" : "var(--bg-surface)"}
-                stroke={isSelected ? "var(--accent)" : "var(--border-strong)"}
-                strokeWidth={1.25}
+                fill={isSelected ? "var(--accent)" : cluster === 0 ? "var(--accent-subtle)" : "var(--bg-surface)"}
+                stroke={isSelected || isConnected ? "var(--accent)" : "var(--border-strong)"}
+                strokeOpacity={dimmed ? 0.35 : 1}
+                strokeWidth={isSelected ? 2 : 1.25}
               />
               <text
                 x={x}
-                y={y + radius + 14}
+                y={y + 3.5}
                 textAnchor="middle"
-                fontSize={10}
-                fill="var(--text-secondary)"
+                fontSize={11}
+                fontWeight={600}
+                fill={isSelected ? "white" : "var(--text-primary)"}
               >
-                {Math.round(paper.similarity * 100)}%
+                {index + 1}
               </text>
+              <foreignObject x={x - 72} y={y + radius + 6} width={144} height={42} opacity={dimmed ? 0.35 : 1}>
+                <div className="line-clamp-2 text-center text-[10px] leading-[1.25] text-text-secondary">
+                  {paper.title}
+                </div>
+              </foreignObject>
             </g>
           );
         })}
       </svg>
 
-      {/* Selected-paper readout — empty until a node is clicked. */}
-      <div className="mt-3 min-h-[64px] shrink-0 rounded-md border border-[color:var(--border-default)] bg-bg-surface px-3 pb-4 pt-2.5">
-        {selected ? (
-          <div className="flex flex-col gap-1 animate-fade-in">
-            <p className="line-clamp-2 text-[13px] font-medium leading-[1.4] text-text-primary">
-              {selected.title}
-            </p>
-            <p className="text-[12px] text-text-secondary">
-              {selected.authors[0]}
-              {selected.authors.length > 1 ? " et al." : ""} · {selected.venue} ·{" "}
-              {selected.year}
-              {selected.is_fallback ? " · Demo source" : ""}
-            </p>
-            <div className="flex items-center gap-2">
-              <span
-                className={cn(
-                  "rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.04em]",
-                  "bg-accent-subtle text-accent",
-                )}
-              >
-                {Math.round(selected.similarity * 100)}% ·{" "}
-                {similarityLabel(selected.similarity)}
-              </span>
-              {selectedConnectionCount > 0 ? (
-                <span className="text-[11px] text-text-tertiary">
-                  {selectedConnectionCount} OpenAlex graph link
-                  {selectedConnectionCount === 1 ? "" : "s"}
-                </span>
-              ) : null}
-            </div>
-          </div>
-        ) : (
-          <p className="text-[12px] leading-[1.5] text-text-tertiary">
-            Click a paper to see details. Distance to centre encodes similarity;
-            paper-to-paper lines show OpenAlex citation and related-work links.
-          </p>
-        )}
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-[11px] text-text-tertiary">
+        <span className={cn("inline-flex items-center gap-1.5")}>
+          <span className="h-px w-8 bg-[color:var(--border-strong)]" />
+          cites fetched paper
+        </span>
+        <span className={cn("inline-flex items-center gap-1.5")}>
+          <span className="h-px w-8 border-t border-dashed border-[color:var(--border-strong)]" />
+          related work
+        </span>
+        <span>{paperEdges.length} graph link{paperEdges.length === 1 ? "" : "s"}</span>
       </div>
     </div>
   );
