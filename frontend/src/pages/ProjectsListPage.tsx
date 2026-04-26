@@ -45,8 +45,8 @@ export function ProjectsListPage() {
 
   return (
     <main className="flex min-h-screen flex-col">
-      <header className="border-b border-[color:var(--border-default)] bg-bg-primary/95 px-8 pb-5 pt-7 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-[1080px] items-end justify-between gap-6">
+      <header className="flex min-h-24 items-center border-b border-[color:var(--border-default)] bg-bg-primary/95 px-8 py-0 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-[1080px] items-center justify-between gap-6">
           <div>
             <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
               Workspace

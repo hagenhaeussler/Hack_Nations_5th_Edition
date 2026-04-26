@@ -35,24 +35,18 @@ export function similarityLabel(score: number): string {
 /**
  * Build a short, human-readable explanation of why `paper` is relevant to
  * `hypothesis`. We don't have a model handy on the client, so this stitches
- * together the strongest signals we already have: the similarity score, any
- * pre-computed `novelty_relation` from the backend, and a couple of overlap
- * keywords between the hypothesis and the abstract. The output is one
- * sentence (or two, if a `novelty_relation` is present).
+ * together the strongest non-obvious signal we already have: a couple of
+ * overlap keywords between the hypothesis and the abstract/title. The numeric
+ * score is already displayed elsewhere, so repeating it here adds noise.
  */
 export function buildPaperRelevanceExplanation(
   paper: Paper,
   hypothesis: string,
 ): string {
-  const pct = Math.round(paper.similarity * 100);
-  const label = similarityLabel(paper.similarity).toLowerCase();
   const overlap = sharedKeywords(hypothesis, paper.abstract, paper.title);
-
-  const overlapClause = overlap.length
-    ? ` It overlaps your hypothesis on ${formatList(overlap)}.`
+  return overlap.length
+    ? `It overlaps your hypothesis on ${formatList(overlap)}.`
     : "";
-
-  return `Scored ${pct}% (${label}) against your hypothesis.${overlapClause}`;
 }
 
 function sharedKeywords(

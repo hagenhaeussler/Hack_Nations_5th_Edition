@@ -420,7 +420,7 @@ export function CalendarView({
           didResize = true;
           card.style.transition = "none";
           card.style.willChange = "transform,width";
-          card.style.zIndex = "20";
+          card.style.zIndex = "1";
           card.style.boxShadow = "var(--shadow-lg)";
         }
 
@@ -592,7 +592,7 @@ export function CalendarView({
           didMove = true;
           card.style.transition = "none";
           card.style.willChange = "transform";
-          card.style.zIndex = "20";
+          card.style.zIndex = "1";
           card.style.boxShadow = "var(--shadow-lg)";
         }
         currentX = clamp(dx, minTranslate, maxTranslate);
@@ -698,7 +698,7 @@ export function CalendarView({
           body grid pans horizontally beneath it. No prev/next pagination —
           the scroll position itself is the navigation. */}
       <div className="relative flex-1 overflow-auto">
-        <div className="relative" style={{ minWidth: trackMinWidth }}>
+        <div className="relative flex min-h-full flex-col" style={{ minWidth: trackMinWidth }}>
           {showsNowLine ? (
             <div
               className="pointer-events-none absolute top-0 bottom-0 z-30"
@@ -739,7 +739,7 @@ export function CalendarView({
             })}
           </div>
 
-          <div className="relative">
+          <div className="relative min-h-[420px] flex-1">
             <div
               className="pointer-events-none absolute inset-0 grid"
               style={{ gridTemplateColumns }}
@@ -764,7 +764,7 @@ export function CalendarView({
 
             <div
               ref={gridRef}
-              className="relative grid min-h-[420px] auto-rows-min gap-y-2 px-1 py-2"
+              className="relative grid min-h-full auto-rows-min gap-y-2 px-1 py-2"
               style={{ gridTemplateColumns }}
             >
               {placedTasks.length === 0 ? (
@@ -899,7 +899,7 @@ function TaskCard({
         aria-label={`${task.data.stepName}, drag to reschedule`}
         onPointerDown={onMoveStart}
         className={cn(
-          "flex h-full w-full select-none flex-col px-4 py-4 text-left",
+          "flex h-full w-full select-none flex-col px-4 pb-4 pt-2.5 text-left",
           "touch-none",
           "cursor-grab active:cursor-grabbing",
           "focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]/40",
@@ -911,11 +911,11 @@ function TaskCard({
           </h4>
         </div>
 
-        <p className="mt-3 min-h-0 flex-1 rounded-md bg-bg-primary/60 px-3 py-3 text-[12px] leading-[1.55] text-text-secondary line-clamp-[7]">
+        <p className="mt-0.5 min-h-0 flex-1 rounded-md bg-bg-primary/60 px-2 py-2 text-[12px] leading-[1.5] text-text-secondary line-clamp-[7]">
           {task.data.procedure || "No procedure supplied."}
         </p>
 
-        <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-[10px] leading-[1.2]">
+        <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2 text-[10px] leading-[1.2]">
           <span
             className="inline-flex max-w-full items-center gap-1 rounded-full bg-bg-hover px-2.5 py-1 font-medium text-text-tertiary"
             title={`Estimated cost: ${task.data.price}`}
