@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 
 import { finalPlanToWorkflow } from "../lib/creatorAgent.js";
 import { applyCalendarSchedule } from "../lib/creatorAgentSchedule.js";
-import { getSetupWarnings } from "../lib/config.js";
+import { config, getSetupWarnings } from "../lib/config.js";
 import { validateExperimentPlanGraph, validateFinalPlanGraph } from "../lib/graphValidation.js";
 import { tasksFromPlanNodes } from "../lib/calendarLayout.js";
+import { logger } from "../lib/logger.js";
 import type {
   FinalExperimentPlan,
   FinalPlanCitation,
@@ -33,6 +34,7 @@ import {
   fallbackQA,
 } from "./fallbackAgents.js";
 import {
+  type AgentRunResult,
   analyzeNoveltyWithOpenAI,
   answerQAWithOpenAI,
   extractHypothesisWithOpenAI,
@@ -65,19 +67,64 @@ function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function stringArrayMetadata(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+}
+
+async function withResearchAgentTimeout<T>(args: {
+  agentName: string;
+  run: () => Promise<AgentRunResult<T>>;
+  fallbackFn: () => T;
+}): Promise<AgentRunResult<T>> {
+  const timeoutMs = config.openai.researchStepTimeoutMs;
+  const startedAt = Date.now();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  const timeoutResult = new Promise<AgentRunResult<T>>((resolve) => {
+    timeout = setTimeout(() => {
+      resolve({
+        data: args.fallbackFn(),
+        mode: "fallback",
+        warnings: [`${args.agentName} timed out after ${timeoutMs}ms. Used local fallback.`],
+      });
+    }, timeoutMs);
+  });
+
+  const result = await Promise.race([
+    args.run().finally(() => {
+      if (timeout) clearTimeout(timeout);
+    }),
+    timeoutResult,
+  ]);
+  logger.info("research.agent.completed", {
+    agentName: args.agentName,
+    mode: result.mode,
+    durationMs: Date.now() - startedAt,
+    timeoutMs,
+    warningCount: result.warnings.length,
+  });
+  return result;
+}
+
 export function sourceToPaper(source: ResearchSource, index: number): Paper {
   return {
     id: source.external_id ?? `source_${String(index + 1).padStart(3, "0")}`,
     title: source.title,
     authors: source.authors,
     year: source.year ?? new Date().getFullYear(),
-    venue: source.is_fallback ? "LabPilot demo source" : String(source.metadata.provider ?? "External research"),
+    venue: source.is_fallback
+      ? "LabPilot demo source"
+      : String(source.metadata.venue ?? source.metadata.provider ?? "External research"),
     similarity: source.relevance_score ?? 0.55,
     abstract: source.abstract,
     url: source.url ?? undefined,
     is_fallback: source.is_fallback,
     provider: source.is_fallback ? "demo" : String(source.metadata.provider ?? "generic"),
     novelty_relation: source.novelty_relation,
+    referencedPaperIds: stringArrayMetadata(source.metadata.referenced_openalex_ids),
+    relatedPaperIds: stringArrayMetadata(source.metadata.related_openalex_ids),
   };
 }
 
@@ -98,9 +145,15 @@ export function paperToResearchSource(paper: Paper): ResearchSource {
 
 export async function runResearchAgents(hypothesis: string): Promise<ResearchAgentResult> {
   const warnings = [...getSetupWarnings()];
-  const extractionRun = await extractHypothesisWithOpenAI({
-    hypothesis,
-    fallbackFn: () => fallbackExtractHypothesis(hypothesis),
+  const extractionFallback = () => fallbackExtractHypothesis(hypothesis);
+  const extractionRun = await withResearchAgentTimeout({
+    agentName: "hypothesis_extraction",
+    run: () =>
+      extractHypothesisWithOpenAI({
+        hypothesis,
+        fallbackFn: extractionFallback,
+      }),
+    fallbackFn: extractionFallback,
   });
   warnings.push(...extractionRun.warnings);
 
@@ -111,20 +164,28 @@ export async function runResearchAgents(hypothesis: string): Promise<ResearchAge
   });
   warnings.push(...research.warnings);
 
-  const noveltyRun = await analyzeNoveltyWithOpenAI({
-    hypothesis,
-    extraction: extractionRun.data,
-    sources: research.sources,
-    fallbackFn: () => fallbackNoveltyAnalysis(hypothesis, research.sources),
+  const noveltyFallback = () => fallbackNoveltyAnalysis(hypothesis, research.sources);
+  const noveltyRun = await withResearchAgentTimeout({
+    agentName: "novelty_analysis",
+    run: () =>
+      analyzeNoveltyWithOpenAI({
+        hypothesis,
+        extraction: extractionRun.data,
+        sources: research.sources,
+        fallbackFn: noveltyFallback,
+      }),
+    fallbackFn: noveltyFallback,
   });
   warnings.push(...noveltyRun.warnings);
 
   const mode =
-    extractionRun.mode === "openai" && noveltyRun.mode === "openai"
-      ? research.mode === "external"
+    research.mode === "external"
+      ? extractionRun.mode === "openai" && noveltyRun.mode === "openai"
         ? "openai"
         : "partial"
-      : "fallback";
+      : extractionRun.mode === "openai" || noveltyRun.mode === "openai"
+        ? "partial"
+        : "fallback";
 
   return {
     extraction: extractionRun.data,

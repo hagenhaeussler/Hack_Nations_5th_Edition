@@ -28,6 +28,8 @@ export interface Paper {
   provider?: string;
   novelty_relation?: string;
   is_fallback?: boolean;
+  referencedPaperIds?: string[];
+  relatedPaperIds?: string[];
 }
 
 export interface WorkflowNode {

@@ -19,6 +19,8 @@ export interface Paper {
   provider?: string;
   novelty_relation?: string;
   is_fallback?: boolean;
+  referencedPaperIds?: string[];
+  relatedPaperIds?: string[];
 }
 
 export function similarityLabel(score: number): string {

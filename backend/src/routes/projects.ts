@@ -10,6 +10,7 @@ import {
   generatePrePlan,
   type PrePlanInputDocument,
 } from "../lib/prePlanMaker.js";
+import { logger } from "../lib/logger.js";
 import type { PlanEditRequest, WorkflowNode } from "../lib/projectTypes.js";
 import { getProjectsRepo } from "../lib/projectsRepo.js";
 import { upload } from "../lib/uploads.js";
@@ -120,7 +121,10 @@ function sendLearningError(res: Response, err: unknown): void {
     res.status(err.statusCode).json({ ok: false, error: err.message });
     return;
   }
-  console.error("[labpilot] feedback learning error", err);
+  logger.error("feedback_learning.error", {
+    message: errorMessage(err),
+    stack: errorStack(err),
+  });
   res.status(500).json({
     ok: false,
     error: err instanceof Error ? err.message : "Unknown feedback learning error",
@@ -135,6 +139,10 @@ function errorStack(err: unknown): string | undefined {
   return err instanceof Error ? err.stack : undefined;
 }
 
+function elapsedMs(startedAt: number): number {
+  return Date.now() - startedAt;
+}
+
 function sendRouteError(
   res: Response,
   err: unknown,
@@ -146,7 +154,7 @@ function sendRouteError(
   },
 ): void {
   const message = errorMessage(err);
-  console.error("[labpilot] route error", {
+  logger.error("route.error", {
     ...context,
     message,
     stack: errorStack(err),
@@ -199,12 +207,9 @@ router.get("/:id", async (req: Request, res: Response) => {
  *   JSON: `{ "hypothesis": string }`
  *   multipart: `hypothesis`, `files`, `fileCategories`, `links`, `linkCategories`
  *
- * Creates a project, simulates the literature-search latency, then attaches
- * the paper set and a pre-plan procedure template. The frontend should redirect
- * to a loading screen the moment it gets the project id back, and poll / await
- * this response before routing to the research view. We intentionally hold the
- * response open for `MOCK_LATENCY_MS` so the loading screen has something to
- * wait on.
+ * Creates a project, runs semantic literature search, then attaches the paper
+ * set and a pre-plan procedure template. `MOCK_LATENCY_MS` can add a local demo
+ * delay, but defaults to 0 so real AI/search work does not hit proxy timeouts.
  */
 router.post("/research", upload.array("files", 10), async (req: Request, res: Response) => {
   const requestId = randomUUID();
@@ -218,8 +223,22 @@ router.post("/research", upload.array("files", 10), async (req: Request, res: Re
 
   let projectId: string | undefined;
   let stage = "creating project";
+  const startedAt = Date.now();
+  let stageStartedAt = startedAt;
+  const finishStage = (nextStage: string, extra: Record<string, unknown> = {}) => {
+    logger.info("research.stage.completed", {
+      requestId,
+      projectId,
+      stage,
+      durationMs: elapsedMs(stageStartedAt),
+      totalMs: elapsedMs(startedAt),
+      ...extra,
+    });
+    stage = nextStage;
+    stageStartedAt = Date.now();
+  };
   try {
-    console.info("[labpilot] research request started", {
+    logger.info("research.request.started", {
       requestId,
       hypothesisLength: hypothesis.length,
       attachmentCount: Array.isArray(req.files) ? req.files.length : 0,
@@ -230,14 +249,20 @@ router.post("/research", upload.array("files", 10), async (req: Request, res: Re
     });
     projectId = project.id;
 
-    stage = "waiting for research latency";
-    await sleep(env.mockLatencyMs);
+    finishStage("waiting for research latency", { mockLatencyMs: env.mockLatencyMs });
+    if (env.mockLatencyMs > 0) {
+      await sleep(env.mockLatencyMs);
+    }
 
-    stage = "running research agents";
+    finishStage("running research agents");
     const research = await runResearchAgents(hypothesis);
     const papers = research.papers;
 
-    stage = "building pre-plan procedure template";
+    finishStage("building pre-plan procedure template", {
+      mode: research.mode,
+      paperCount: papers.length,
+      warningCount: research.warnings.length,
+    });
     const prePlan = generatePrePlan({
       hypothesis,
       papers,
@@ -249,7 +274,7 @@ router.post("/research", upload.array("files", 10), async (req: Request, res: Re
       ...research.warnings,
     ];
 
-    stage = "saving research results";
+    finishStage("saving research results");
     const updated = await repo.attachResearchResults(
       project.id,
       papers,
@@ -270,12 +295,13 @@ router.post("/research", upload.array("files", 10), async (req: Request, res: Re
       return;
     }
 
-    console.info("[labpilot] research request completed", {
+    logger.info("research.request.completed", {
       requestId,
       projectId: updated.id,
       mode: research.mode,
       paperCount: papers.length,
       warningCount: research.warnings.length,
+      durationMs: elapsedMs(startedAt),
     });
     res.status(201).json({
       ok: true,
@@ -320,7 +346,7 @@ router.post("/:id/generate", async (req: Request, res: Response) => {
       return;
     }
 
-    console.info("[labpilot] generation request started", { requestId, projectId: id });
+    logger.info("generation.request.started", { requestId, projectId: id });
     stage = "marking project generating";
     await repo.setStatus(id, "generating");
 
@@ -367,7 +393,7 @@ router.post("/:id/generate", async (req: Request, res: Response) => {
     stage = "initializing plan version";
     await feedbackLearning.initializeCreatorPlanVersion(updated);
 
-    console.info("[labpilot] generation request completed", {
+    logger.info("generation.request.completed", {
       requestId,
       projectId: id,
       planId: generated.plan.plan_id,

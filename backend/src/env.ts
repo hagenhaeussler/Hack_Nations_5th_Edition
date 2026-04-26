@@ -8,6 +8,8 @@ const toInt = (v: string | undefined, fallback: number): number => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const defaultMockLatencyMs = 0;
+
 export const env = {
   port: toInt(process.env.PORT, 4000),
   uploadDir: process.env.UPLOAD_DIR ?? "./uploads",
@@ -20,7 +22,8 @@ export const env = {
   databaseUrl: process.env.DATABASE_URL ?? null,
   /**
    * How long the mocked research / generation calls "think" for, in ms.
-   * The MVP spec calls for ~10s, so low local overrides are clamped back up.
+   * Defaults to no artificial delay so long-running AI/search calls do not
+   * trip serverless or proxy timeouts. Dev can opt into the loading demo.
    */
-  mockLatencyMs: Math.max(toInt(process.env.MOCK_LATENCY_MS, 10_000), 10_000),
+  mockLatencyMs: Math.max(toInt(process.env.MOCK_LATENCY_MS, defaultMockLatencyMs), 0),
 } as const;

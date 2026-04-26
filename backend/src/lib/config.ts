@@ -19,11 +19,22 @@ const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const databaseUrl = process.env.DATABASE_URL;
 const openaiApiKey = process.env.OPENAI_API_KEY ?? process.env.LLM_API_KEY;
+const openaiResearchStepTimeoutMs = Number.parseInt(
+  process.env.OPENAI_RESEARCH_STEP_TIMEOUT_MS ?? "3000",
+  10,
+);
+const openAlexEnabled = process.env.OPENALEX_ENABLED !== "false";
+const openAlexMaxResults = Number.parseInt(process.env.OPENALEX_MAX_RESULTS ?? "24", 10);
+const openAlexMaxQueries = Number.parseInt(process.env.OPENALEX_MAX_QUERIES ?? "3", 10);
+const openAlexTimeoutMs = Number.parseInt(process.env.OPENALEX_TIMEOUT_MS ?? "8000", 10);
 
 const supabaseConfigured =
   hasValue(supabaseUrl) && (hasValue(supabaseServiceRoleKey) || hasValue(supabaseAnonKey));
 const databaseConfigured = hasValue(databaseUrl);
 const openaiConfigured = hasValue(openaiApiKey);
+const genericResearchConfigured =
+  hasValue(process.env.GENERIC_RESEARCH_API_URL) &&
+  hasValue(process.env.GENERIC_RESEARCH_API_KEY);
 
 export const config = {
   environment: process.env.NODE_ENV ?? "development",
@@ -31,6 +42,9 @@ export const config = {
   openai: {
     enabled: openaiConfigured,
     apiKey: openaiApiKey ?? null,
+    researchStepTimeoutMs: Number.isFinite(openaiResearchStepTimeoutMs)
+      ? Math.max(1000, Math.min(30_000, openaiResearchStepTimeoutMs))
+      : 3000,
   },
   supabase: {
     enabled: supabaseConfigured,
@@ -47,11 +61,23 @@ export const config = {
     bucket: process.env.SUPABASE_STORAGE_BUCKET ?? "labpilot-files",
   },
   researchApi: {
-    enabled:
-      hasValue(process.env.GENERIC_RESEARCH_API_URL) &&
-      hasValue(process.env.GENERIC_RESEARCH_API_KEY),
+    enabled: openAlexEnabled || genericResearchConfigured,
     url: process.env.GENERIC_RESEARCH_API_URL ?? null,
     apiKey: process.env.GENERIC_RESEARCH_API_KEY ?? null,
+  },
+  openAlex: {
+    enabled: openAlexEnabled,
+    apiKey: process.env.OPENALEX_API_KEY ?? null,
+    mailto: process.env.OPENALEX_MAILTO ?? null,
+    maxResults: Number.isFinite(openAlexMaxResults)
+      ? Math.max(1, Math.min(100, openAlexMaxResults))
+      : 24,
+    maxQueries: Number.isFinite(openAlexMaxQueries)
+      ? Math.max(1, Math.min(5, openAlexMaxQueries))
+      : 3,
+    timeoutMs: Number.isFinite(openAlexTimeoutMs)
+      ? Math.max(1000, Math.min(30_000, openAlexTimeoutMs))
+      : 8000,
   },
   models: {
     high: process.env.OPENAI_HIGH_MODEL ?? "gpt-5.5",
@@ -72,7 +98,7 @@ export function getMissingServiceMessage(serviceName: ServiceName): string {
     case "storage":
       return "File storage not configured. Continuing without uploaded file context.";
     case "researchApi":
-      return "External research API not configured. Using demo research sources.";
+      return "OpenAlex or an external research API is not configured. Using demo research sources.";
     case "embeddings":
       return "Embeddings not configured. Using keyword search fallback.";
   }

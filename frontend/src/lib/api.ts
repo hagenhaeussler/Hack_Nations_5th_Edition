@@ -87,6 +87,11 @@ type ApiErr = {
 };
 type ApiResponse<T> = ApiOk<T> | ApiErr;
 
+interface ParsedApiResponse<T> {
+  payload: ApiResponse<T> | null;
+  rawText: string;
+}
+
 interface JsonRequestInit extends Omit<RequestInit, "body"> {
   /** When set, serialised as JSON and sent with `Content-Type: application/json`. */
   body?: unknown;
@@ -112,19 +117,36 @@ async function jsonRequest<T>(path: string, init?: JsonRequestInit): Promise<T> 
   }
 
   const res = await fetch(apiPath(path), { ...init, headers, body });
-  const payload = (await res
-    .json()
-    .catch(() => null)) as ApiResponse<T> | null;
+  const { payload, rawText } = await parseApiResponse<T>(res);
 
   if (!res.ok || !payload) {
     const message =
-      payload && payload.ok === false ? formatApiError(payload, res.statusText) : res.statusText;
+      payload && payload.ok === false
+        ? formatApiError(payload, res.statusText)
+        : formatHttpError(res, rawText);
     throw new Error(message || `Backend error: ${res.status}`);
   }
   if (payload.ok === false) {
     throw new Error(formatApiError(payload, `Backend error: ${res.status}`));
   }
   return payload;
+}
+
+async function parseApiResponse<T>(res: Response): Promise<ParsedApiResponse<T>> {
+  const rawText = await res.text();
+  if (!rawText.trim()) return { payload: null, rawText };
+  try {
+    return { payload: JSON.parse(rawText) as ApiResponse<T>, rawText };
+  } catch {
+    return { payload: null, rawText };
+  }
+}
+
+function formatHttpError(res: Response, rawText: string): string {
+  const body = rawText.trim();
+  const pieces = [`Backend error ${res.status}: ${res.statusText || "Request failed"}`];
+  if (body) pieces.push(body.slice(0, 240));
+  return pieces.join(" | ");
 }
 
 function formatApiError(payload: ApiErr, fallback: string): string {
@@ -142,7 +164,7 @@ function formatApiError(payload: ApiErr, fallback: string): string {
  * Kicks off the literature search for a hypothesis.
  *
  * The backend creates the project synchronously, holds the response open for
- * the configured mock latency (~10s), then returns the populated project with
+ * the configured mock latency, then returns the populated project with
  * `status: "research-ready"`. Callers should render a loading screen for the
  * duration.
  */
@@ -167,13 +189,13 @@ export async function startResearch(
       method: "POST",
       body: form,
     });
-    const payload = (await res
-      .json()
-      .catch(() => null)) as ApiResponse<{ project: Project }> | null;
+    const { payload, rawText } = await parseApiResponse<{ project: Project }>(res);
 
     if (!res.ok || !payload) {
       const message =
-        payload && payload.ok === false ? formatApiError(payload, res.statusText) : res.statusText;
+        payload && payload.ok === false
+          ? formatApiError(payload, res.statusText)
+          : formatHttpError(res, rawText);
       throw new Error(message || `Backend error: ${res.status}`);
     }
     if (payload.ok === false) {

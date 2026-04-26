@@ -11,6 +11,8 @@ interface PaperGraphProps {
   onSelect?: (paper: Paper) => void;
 }
 
+type PaperRelationKind = "citation" | "related";
+
 /**
  * A small, dependency-free network diagram.
  *
@@ -49,9 +51,63 @@ export function PaperGraph({ prompt: _prompt, papers, onSelect }: PaperGraphProp
     });
   }, [papers]);
 
+  const paperEdges = useMemo(() => {
+    const nodesById = new Map(layout.map((node) => [node.paper.id, node]));
+    const seen = new Set<string>();
+    const edges: Array<{
+      id: string;
+      sourceId: string;
+      targetId: string;
+      sourceX: number;
+      sourceY: number;
+      targetX: number;
+      targetY: number;
+      kind: PaperRelationKind;
+    }> = [];
+
+    const addEdge = (sourceId: string, targetId: string, kind: PaperRelationKind) => {
+      if (sourceId === targetId) return;
+      const source = nodesById.get(sourceId);
+      const target = nodesById.get(targetId);
+      if (!source || !target) return;
+      const key =
+        kind === "related"
+          ? `${kind}:${[sourceId, targetId].sort().join(":")}`
+          : `${kind}:${sourceId}:${targetId}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      edges.push({
+        id: key,
+        sourceId,
+        targetId,
+        sourceX: source.x,
+        sourceY: source.y,
+        targetX: target.x,
+        targetY: target.y,
+        kind,
+      });
+    };
+
+    for (const { paper } of layout) {
+      for (const targetId of paper.referencedPaperIds ?? []) {
+        addEdge(paper.id, targetId, "citation");
+      }
+      for (const targetId of paper.relatedPaperIds ?? []) {
+        addEdge(paper.id, targetId, "related");
+      }
+    }
+
+    return edges;
+  }, [layout]);
+
   const selected = selectedId
     ? layout.find((n) => n.paper.id === selectedId)?.paper ?? null
     : null;
+  const selectedConnectionCount = selected
+    ? paperEdges.filter(
+        (edge) => edge.sourceId === selected.id || edge.targetId === selected.id,
+      ).length
+    : 0;
 
   const togglePaper = (paper: Paper) => {
     setSelectedId((curr) => (curr === paper.id ? null : paper.id));
@@ -87,7 +143,26 @@ export function PaperGraph({ prompt: _prompt, papers, onSelect }: PaperGraphProp
           );
         })}
 
-        {/* Edges */}
+        {/* OpenAlex paper-to-paper citation / related-work relationships. */}
+        {paperEdges.map((edge) => {
+          const isSelected =
+            selectedId === edge.sourceId || selectedId === edge.targetId;
+          return (
+            <line
+              key={edge.id}
+              x1={edge.sourceX}
+              y1={edge.sourceY}
+              x2={edge.targetX}
+              y2={edge.targetY}
+              stroke={isSelected ? "var(--accent)" : "var(--border-default)"}
+              strokeOpacity={isSelected ? 0.7 : 0.3}
+              strokeWidth={isSelected ? 1.25 : 0.75}
+              strokeDasharray={edge.kind === "related" ? "4 5" : undefined}
+            />
+          );
+        })}
+
+        {/* Hypothesis-to-paper similarity edges. */}
         {layout.map(({ paper, x, y }) => {
           const isSelected = selectedId === paper.id;
           return (
@@ -185,11 +260,18 @@ export function PaperGraph({ prompt: _prompt, papers, onSelect }: PaperGraphProp
                 {Math.round(selected.similarity * 100)}% ·{" "}
                 {similarityLabel(selected.similarity)}
               </span>
+              {selectedConnectionCount > 0 ? (
+                <span className="text-[11px] text-text-tertiary">
+                  {selectedConnectionCount} OpenAlex graph link
+                  {selectedConnectionCount === 1 ? "" : "s"}
+                </span>
+              ) : null}
             </div>
           </div>
         ) : (
           <p className="text-[12px] leading-[1.5] text-text-tertiary">
-            Click a paper to see details. Distance to centre encodes similarity.
+            Click a paper to see details. Distance to centre encodes similarity;
+            paper-to-paper lines show OpenAlex citation and related-work links.
           </p>
         )}
       </div>
