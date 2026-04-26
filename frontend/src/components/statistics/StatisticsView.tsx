@@ -9,6 +9,8 @@ import {
 import { useMemo } from "react";
 
 import type { WorkflowStatus } from "@/components/timeline/WorkflowNode";
+import type { Paper } from "@/lib/papers";
+import type { Workflow } from "@/lib/projects";
 import {
   formatUSD,
   getDomainExperts,
@@ -22,8 +24,12 @@ import {
 import { cn } from "@/lib/utils";
 
 interface StatisticsViewProps {
-  /** Hypothesis from the landing page — used to seed the experts list. */
+  /** Hypothesis from the landing page — kept for context only. */
   prompt?: string;
+  /** Papers attached to the project; powers the experts tile. */
+  papers: Paper[];
+  /** Workflow attached to the project; powers the time + tasks tiles. */
+  workflow: Workflow;
 }
 
 /**
@@ -44,16 +50,13 @@ interface StatisticsViewProps {
  * stack in the same priority order. Card styling follows design_guide.md
  * §8 — warm cream surface, soft border, terracotta used only for accents.
  */
-export function StatisticsView({ prompt }: StatisticsViewProps) {
-  const time = useMemo(() => getProjectTime(), []);
+export function StatisticsView({ prompt: _prompt, papers, workflow }: StatisticsViewProps) {
+  const time = useMemo(() => getProjectTime(workflow), [workflow]);
   const budget = useMemo(() => getProjectBudget(), []);
   const team = useMemo(() => getTeam(), []);
-  const tasks = useMemo(() => getProjectTasks(), []);
+  const tasks = useMemo(() => getProjectTasks(workflow), [workflow]);
   const validation = useMemo(() => getValidationCriteria(), []);
-  const experts = useMemo(
-    () => getDomainExperts(prompt ?? "labpilot", 5),
-    [prompt],
-  );
+  const experts = useMemo(() => getDomainExperts(papers, 5), [papers]);
 
   return (
     <section className="flex-1 overflow-y-auto px-8 py-6">

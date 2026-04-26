@@ -59,10 +59,10 @@ export function PaperGraph({ prompt: _prompt, papers, onSelect }: PaperGraphProp
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-[360px] flex-col">
       <svg
         viewBox="0 0 480 400"
-        className="h-full w-full"
+        className="min-h-0 w-full flex-1"
         role="img"
         aria-label="Graph of papers similar to your prompt"
         onClick={(e) => {
@@ -163,7 +163,7 @@ export function PaperGraph({ prompt: _prompt, papers, onSelect }: PaperGraphProp
       </svg>
 
       {/* Selected-paper readout — empty until a node is clicked. */}
-      <div className="mt-3 min-h-[64px] rounded-md border border-[color:var(--border-default)] bg-bg-surface px-3 pt-2.5 pb-4">
+      <div className="mt-3 min-h-[64px] shrink-0 rounded-md border border-[color:var(--border-default)] bg-bg-surface px-3 pb-4 pt-2.5">
         {selected ? (
           <div className="flex flex-col gap-1 animate-fade-in">
             <p className="line-clamp-2 text-[13px] font-medium leading-[1.4] text-text-primary">

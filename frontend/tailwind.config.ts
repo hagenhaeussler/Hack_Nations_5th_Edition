@@ -76,11 +76,21 @@ const config: Config = {
           "0%": { opacity: "0", transform: "translateX(16px)" },
           "100%": { opacity: "1", transform: "translateX(0)" },
         },
+        "pulse-slow": {
+          "0%, 100%": { opacity: "1", transform: "scale(1)" },
+          "50%": { opacity: "0.6", transform: "scale(0.94)" },
+        },
+        "progress-slide": {
+          "0%": { transform: "translateX(-110%)" },
+          "100%": { transform: "translateX(420%)" },
+        },
       },
       animation: {
         "fade-in": "fade-in 200ms ease",
         "fade-up": "fade-up 250ms cubic-bezier(0.0, 0.0, 0.2, 1)",
         "slide-in-right": "slide-in-right 250ms cubic-bezier(0.0, 0.0, 0.2, 1)",
+        "pulse-slow": "pulse-slow 2.4s ease-in-out infinite",
+        "progress-slide": "progress-slide 2.2s cubic-bezier(0.4, 0.0, 0.2, 1) infinite",
       },
     },
   },

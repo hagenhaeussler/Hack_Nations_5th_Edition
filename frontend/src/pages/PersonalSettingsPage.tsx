@@ -10,8 +10,8 @@ import {
   UserRound,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 
-import { SidebarRail } from "@/components/SidebarRail";
 import { usePersonal } from "@/lib/personalSettingsContext";
 import {
   resolveTheme,
@@ -19,30 +19,27 @@ import {
 } from "@/lib/usePersonalSettings";
 import { cn } from "@/lib/utils";
 
-interface PersonalSettingsPageProps {
-  onBack: () => void;
-  onOpenLabSettings?: () => void;
-}
-
-export function PersonalSettingsPage({
-  onBack,
-  onOpenLabSettings,
-}: PersonalSettingsPageProps) {
+/**
+ * `/personal-settings` — user-level preferences (name, email, theme,
+ * accessibility, composer behaviour).
+ *
+ * Renders inside {@link AppShell}, which provides the global sidebar — no
+ * page-level navigation chrome here. The "Back" affordance simply walks the
+ * router history one step so it works whether the user came from the landing
+ * page, a project, or a deep link.
+ */
+export function PersonalSettingsPage() {
+  const navigate = useNavigate();
   const personal = usePersonal();
   const { settings } = personal;
 
   return (
     <main className="relative flex min-h-screen flex-col bg-bg-primary text-text-primary">
-      <SidebarRail
-        onOpenHome={onBack}
-        onOpenLabSettings={onOpenLabSettings}
-      />
-
       <section
         aria-label="Personal settings"
-        className="mx-auto flex w-full max-w-[var(--chat-max-width)] flex-1 flex-col gap-8 px-6 pb-24 pt-28 sm:px-8"
+        className="mx-auto flex w-full max-w-[var(--chat-max-width)] flex-1 flex-col gap-8 px-6 pb-24 pt-12 sm:px-8"
       >
-        <BackBar onBack={onBack} />
+        <BackBar onBack={() => navigate(-1)} />
 
         <PersonalHeader
           displayName={settings.displayName}

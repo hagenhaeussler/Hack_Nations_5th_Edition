@@ -8,8 +8,8 @@ import {
   X,
 } from "lucide-react";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
-import { SidebarRail } from "@/components/SidebarRail";
 import { useLabSettings } from "@/lib/useLabSettings";
 import type {
   Equipment,
@@ -19,30 +19,19 @@ import type {
 } from "@/lib/useLabSettings";
 import { cn } from "@/lib/utils";
 
-interface LabSettingsPageProps {
-  onBack: () => void;
-  onOpenPersonalSettings?: () => void;
-}
-
-export function LabSettingsPage({
-  onBack,
-  onOpenPersonalSettings,
-}: LabSettingsPageProps) {
+export function LabSettingsPage() {
+  const navigate = useNavigate();
   const lab = useLabSettings();
   const { settings } = lab;
+  const goBack = () => navigate(-1);
 
   return (
-    <main className="relative flex min-h-screen flex-col bg-bg-primary text-text-primary">
-      <SidebarRail
-        onOpenHome={onBack}
-        onOpenPersonalSettings={onOpenPersonalSettings}
-      />
-
+    <main className="relative flex min-h-screen flex-col">
       <section
         aria-label="Lab settings"
-        className="mx-auto flex w-full max-w-[var(--chat-max-width)] flex-1 flex-col gap-8 px-6 pb-24 pt-28 sm:px-8"
+        className="mx-auto flex w-full max-w-[var(--chat-max-width)] flex-1 flex-col gap-8 px-6 pb-24 pt-12 sm:px-8"
       >
-        <BackBar onBack={onBack} />
+        <BackBar onBack={goBack} />
 
         <LabTitleHeader
           labName={settings.labName}

@@ -1,63 +1,39 @@
-import { useState } from "react";
+import { Navigate, Route, Routes } from "react-router-dom";
 
+import { AppShell } from "@/components/AppShell";
 import { LabSettingsPage } from "@/pages/LabSettingsPage";
 import { LandingPage } from "@/pages/LandingPage";
 import { PersonalSettingsPage } from "@/pages/PersonalSettingsPage";
-import { TimelinePage } from "@/pages/TimelinePage";
+import { ProjectPage } from "@/pages/ProjectPage";
+import { ProjectsListPage } from "@/pages/ProjectsListPage";
 
-type View =
-  | { name: "landing" }
-  | { name: "timeline"; prompt: string }
-  | { name: "lab-settings" }
-  | { name: "personal-settings" };
-
+/**
+ * Route table.
+ *
+ * Every visible page renders inside {@link AppShell} so the sidebar nav (New
+ * Project / Projects / Lab Settings / Personal Settings) is always present.
+ *
+ *   /                         → LandingPage          (prompt + past projects)
+ *   /projects                 → ProjectsListPage     (all saved projects)
+ *   /projects/:id             → ProjectPage          (research view OR
+ *                                                     workflow view, driven
+ *                                                     by `project.status`)
+ *   /lab-settings             → LabSettingsPage
+ *   /personal-settings        → PersonalSettingsPage
+ *
+ * Anything else falls back to "/" so a stale URL never strands the user.
+ */
 export default function App() {
-  // Lightweight in-memory router. The active search prompt persists across
-  // landing → timeline navigation so the timeline stub can quote it back.
-  const [view, setView] = useState<View>({ name: "landing" });
-  const [activePrompt, setActivePrompt] = useState<string | null>(null);
-
-  const goLanding = () => setView({ name: "landing" });
-  const goLabSettings = () => setView({ name: "lab-settings" });
-  const goPersonalSettings = () => setView({ name: "personal-settings" });
-
-  if (view.name === "timeline") {
-    return (
-      <TimelinePage
-        prompt={view.prompt}
-        onBack={goLanding}
-        onOpenLabSettings={goLabSettings}
-        onOpenPersonalSettings={goPersonalSettings}
-      />
-    );
-  }
-
-  if (view.name === "lab-settings") {
-    return (
-      <LabSettingsPage
-        onBack={goLanding}
-        onOpenPersonalSettings={goPersonalSettings}
-      />
-    );
-  }
-
-  if (view.name === "personal-settings") {
-    return (
-      <PersonalSettingsPage
-        onBack={goLanding}
-        onOpenLabSettings={goLabSettings}
-      />
-    );
-  }
-
   return (
-    <LandingPage
-      activePrompt={activePrompt}
-      onSearch={(prompt) => setActivePrompt(prompt)}
-      onArchive={() => setActivePrompt(null)}
-      onOpenTimeline={(prompt) => setView({ name: "timeline", prompt })}
-      onOpenLabSettings={goLabSettings}
-      onOpenPersonalSettings={goPersonalSettings}
-    />
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route index element={<LandingPage />} />
+        <Route path="projects" element={<ProjectsListPage />} />
+        <Route path="projects/:id" element={<ProjectPage />} />
+        <Route path="lab-settings" element={<LabSettingsPage />} />
+        <Route path="personal-settings" element={<PersonalSettingsPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
   );
 }

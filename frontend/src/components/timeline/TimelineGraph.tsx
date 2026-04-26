@@ -9,20 +9,19 @@ import {
   addEdge,
   useEdgesState,
   useNodesState,
+  useReactFlow,
   type Connection,
   type Edge,
   type Node,
   type NodeTypes,
+  type ReactFlowInstance,
+  type Viewport,
 } from "@xyflow/react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 
 import "@xyflow/react/dist/style.css";
 
 import { WorkflowNode, type WorkflowNodeData } from "./WorkflowNode";
-import {
-  EXAMPLE_EDGES,
-  EXAMPLE_NODES,
-} from "./exampleWorkflow";
 
 const nodeTypes: NodeTypes = {
   workflow: WorkflowNode,
@@ -44,41 +43,56 @@ const DEFAULT_EDGE_OPTIONS = {
   },
 } satisfies Partial<Edge>;
 
+function getReadableViewport(nodes: Node<WorkflowNodeData>[]): Viewport {
+  if (nodes.length === 0) return { x: 0, y: 0, zoom: 1 };
+
+  const minX = Math.min(...nodes.map((n) => n.position.x));
+  const minY = Math.min(...nodes.map((n) => n.position.y));
+  const zoom = nodes.length > 8 ? 0.68 : 0.85;
+
+  return {
+    x: 72 - minX * zoom,
+    y: 260 - minY * zoom,
+    zoom,
+  };
+}
+
 /**
  * Pannable / zoomable DAG canvas built on @xyflow/react.
  *
- * The provider wrapper is required so that consumers nested inside a layout
- * (like `TimelinePage`) get correct viewport sizing. The graph defaults to the
- * exemplary "prepare a basic experiment" workflow but accepts overrides for
- * future hypothesis-specific timelines.
+ * The provider wrapper is required so that the inner graph picks up the
+ * correct viewport sizing when nested inside a flexbox layout (e.g.
+ * `ProjectPage`'s workflow view).
  *
- * Selection is fully controlled by the parent: the parent passes
- * `selectedNodeId` and is notified via `onNodeSelect` when the user clicks a
- * node or the empty pane (clears selection). Selected nodes get a terracotta
- * ring rendered by `WorkflowNode`.
+ * The graph is fully controlled: callers pass the nodes + edges to render
+ * (they live on the persisted `Project` record) and the selected node id.
+ * The custom `WorkflowNode` component renders a terracotta ring around the
+ * selected node.
  */
 interface TimelineGraphProps {
-  initialNodes?: Node<WorkflowNodeData>[];
-  initialEdges?: Edge[];
+  initialNodes: Node<WorkflowNodeData>[];
+  initialEdges: Edge[];
   selectedNodeId?: string | null;
   onNodeSelect?: (nodeId: string | null) => void;
 }
 
 export function TimelineGraph({
-  initialNodes = EXAMPLE_NODES,
-  initialEdges = EXAMPLE_EDGES,
+  initialNodes,
+  initialEdges,
   selectedNodeId = null,
   onNodeSelect,
 }: TimelineGraphProps) {
   return (
-    <ReactFlowProvider>
-      <TimelineGraphInner
-        initialNodes={initialNodes}
-        initialEdges={initialEdges}
-        selectedNodeId={selectedNodeId}
-        onNodeSelect={onNodeSelect}
-      />
-    </ReactFlowProvider>
+    <div className="h-full min-h-[560px] w-full">
+      <ReactFlowProvider>
+        <TimelineGraphInner
+          initialNodes={initialNodes}
+          initialEdges={initialEdges}
+          selectedNodeId={selectedNodeId}
+          onNodeSelect={onNodeSelect}
+        />
+      </ReactFlowProvider>
+    </div>
   );
 }
 
@@ -95,9 +109,39 @@ function TimelineGraphInner({
   selectedNodeId,
   onNodeSelect,
 }: TimelineGraphInnerProps) {
-  const [nodes, _setNodes, onNodesChange] =
+  const { setViewport } = useReactFlow();
+  const [nodes, setNodes, onNodesChange] =
     useNodesState<Node<WorkflowNodeData>>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
+  const readableViewport = useMemo(
+    () => getReadableViewport(initialNodes),
+    [initialNodes],
+  );
+
+  useEffect(() => {
+    setNodes(initialNodes);
+    setEdges(initialEdges);
+
+    const frame = window.requestAnimationFrame(() => {
+      void setViewport(readableViewport, { duration: 250 });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    initialEdges,
+    initialNodes,
+    readableViewport,
+    setEdges,
+    setNodes,
+    setViewport,
+  ]);
+
+  const handleInit = useCallback(
+    (instance: ReactFlowInstance<Node<WorkflowNodeData>, Edge>) => {
+      void instance.setViewport(readableViewport, { duration: 250 });
+    },
+    [readableViewport],
+  );
 
   const onConnect = useCallback(
     (connection: Connection) => setEdges((eds) => addEdge(connection, eds)),
@@ -136,10 +180,10 @@ function TimelineGraphInner({
       onConnect={onConnect}
       onNodeClick={handleNodeClick}
       onPaneClick={handlePaneClick}
+      onInit={handleInit}
       nodeTypes={nodeTypes}
       defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
-      fitView
-      fitViewOptions={{ padding: 0.16, minZoom: 0.25, maxZoom: 1 }}
+      defaultViewport={readableViewport}
       minZoom={0.25}
       maxZoom={1.75}
       proOptions={{ hideAttribution: true }}
@@ -148,7 +192,7 @@ function TimelineGraphInner({
       zoomOnScroll
       selectionOnDrag={false}
       nodesConnectable={false}
-      className="bg-bg-primary"
+      className="h-full w-full bg-bg-primary"
     >
       <Background
         variant={BackgroundVariant.Dots}

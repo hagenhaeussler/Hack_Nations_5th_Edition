@@ -48,7 +48,8 @@
   --space-3xl: 64px;
 
   /* Layout */
-  --sidebar-width: 260px;
+  --sidebar-width: 240px;
+  --sidebar-collapsed-width: 56px;
   --chat-max-width: 720px;
   --chat-padding: 24px;
 

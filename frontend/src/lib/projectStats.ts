@@ -1,18 +1,18 @@
 import type { LucideIcon } from "lucide-react";
 import { Beaker, Cpu, Microscope, ShieldCheck, Syringe } from "lucide-react";
 
-import { EXAMPLE_NODES } from "@/components/timeline/exampleWorkflow";
 import type { WorkflowStatus } from "@/components/timeline/WorkflowNode";
-import { getSimilarPapers, type Paper } from "@/lib/papers";
+import type { Paper } from "@/lib/papers";
+import type { Workflow, WorkflowNode } from "@/lib/projects";
 
 /**
  * Aggregated, read-only statistics shown on the project dashboard tab.
  *
- * Where possible we derive numbers from the workflow + similar-papers data
- * already in the app (so adding a step to the timeline shifts the totals
- * here too). Anything that doesn't yet have a real source — budget,
- * roster, validation criteria — is provided as a single seed below so the
- * UI has plausible content while the backend wiring catches up.
+ * Where possible numbers are derived from the project's actual workflow +
+ * papers (so adding a step to the timeline shifts the totals here too).
+ * Anything that doesn't yet have a real source — budget, roster, validation
+ * criteria — is provided as a single static seed so the UI has plausible
+ * content while the backend wiring catches up.
  */
 
 // ---------- Schedule -------------------------------------------------------
@@ -33,17 +33,17 @@ function parseScheduleEnd(label: string | undefined): number {
   return Math.max(...matches.map((n) => Number.parseInt(n, 10)));
 }
 
-export function getProjectTime(): ProjectTime {
-  const ends = EXAMPLE_NODES.map((n) => parseScheduleEnd(n.data.schedule));
-  const totalWeeks = Math.max(...ends, 0);
-  const first = EXAMPLE_NODES[0]?.data.schedule ?? "Day 0";
-  const last =
-    EXAMPLE_NODES[EXAMPLE_NODES.length - 1]?.data.schedule ?? `Week ${totalWeeks}`;
+export function getProjectTime(workflow: Workflow): ProjectTime {
+  const nodes = workflow.nodes;
+  const ends = nodes.map((n) => parseScheduleEnd(n.data.schedule));
+  const totalWeeks = ends.length > 0 ? Math.max(...ends, 0) : 0;
+  const first = nodes[0]?.data.schedule ?? "Day 0";
+  const last = nodes[nodes.length - 1]?.data.schedule ?? `Week ${totalWeeks}`;
   return {
     totalWeeks,
     startLabel: first,
     endLabel: last,
-    taskCount: EXAMPLE_NODES.length,
+    taskCount: nodes.length,
   };
 }
 
@@ -150,8 +150,8 @@ export interface ProjectTask {
   status: WorkflowStatus;
 }
 
-export function getProjectTasks(): ProjectTask[] {
-  return EXAMPLE_NODES.map((n) => ({
+export function getProjectTasks(workflow: Workflow): ProjectTask[] {
+  return workflow.nodes.map((n: WorkflowNode) => ({
     id: n.id,
     title: n.data.title,
     schedule: n.data.schedule,
@@ -210,15 +210,14 @@ function initialsFromAuthor(author: string): string {
   const [surname, given] = author.split(",").map((s) => s.trim());
   const a = surname?.[0] ?? "";
   const b = given?.replace(/[^A-Za-z]/g, "")?.[0] ?? "";
-  return (a + b).toUpperCase() || surname.slice(0, 2).toUpperCase();
+  return (a + b).toUpperCase() || (surname?.slice(0, 2).toUpperCase() ?? "??");
 }
 
 /**
- * Aggregates authors across the most similar papers to surface the
+ * Aggregates authors across the project's related papers to surface the
  * researchers most likely to be useful domain contacts.
  */
-export function getDomainExperts(prompt: string, limit = 5): DomainExpert[] {
-  const papers = getSimilarPapers(prompt, 8);
+export function getDomainExperts(papers: Paper[], limit = 5): DomainExpert[] {
   const byAuthor = new Map<
     string,
     { papers: Paper[]; similaritySum: number }
@@ -235,7 +234,7 @@ export function getDomainExperts(prompt: string, limit = 5): DomainExpert[] {
 
   const ranked: DomainExpert[] = Array.from(byAuthor.entries()).map(
     ([author, { papers: ps, similaritySum }]) => {
-      const top = [...ps].sort((a, b) => b.similarity - a.similarity)[0];
+      const top = [...ps].sort((a, b) => b.similarity - a.similarity)[0]!;
       return {
         name: author,
         initials: initialsFromAuthor(author),
